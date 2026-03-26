@@ -404,6 +404,31 @@
         }
       };
 
+      // ── All hooks must come BEFORE any early returns (Rules of Hooks) ──
+      const totalValue = useMemo(() => {
+        return Object.entries(cartItems).reduce((sum, [prodId, qty]) => {
+          const produto = produtos.find(p => p.id === prodId);
+          return sum + (produto ? produto.preco_unitario * qty : 0);
+        }, 0);
+      }, [cartItems, produtos]);
+
+      const saldoRestante = ORCAMENTO - totalValue;
+      const exceedsBudget = totalValue > ORCAMENTO;
+
+      const filteredProdutos = useMemo(() => {
+        return produtos.filter(p => {
+          const matchSearch = p.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             p.codigo_fornecedor.includes(searchTerm);
+          const matchBrand = !filterBrand || p.marca === filterBrand;
+          return matchSearch && matchBrand;
+        });
+      }, [produtos, searchTerm, filterBrand]);
+
+      const uniqueBrands = useMemo(() => {
+        return [...new Set(produtos.map(p => p.marca))].sort();
+      }, [produtos]);
+
+      // ── Early returns (after all hooks) ──
       if (loading) {
         return (
           <div className="flex items-center justify-center h-screen">
@@ -449,16 +474,6 @@
           });
         }
       };
-
-      const totalValue = useMemo(() => {
-        return Object.entries(cartItems).reduce((sum, [prodId, qty]) => {
-          const produto = produtos.find(p => p.id === prodId);
-          return sum + (produto ? produto.preco_unitario * qty : 0);
-        }, 0);
-      }, [cartItems, produtos]);
-
-      const saldoRestante = ORCAMENTO - totalValue;
-      const exceedsBudget = totalValue > ORCAMENTO;
 
       const handleSubmit = async (e) => {
         e.preventDefault();
@@ -529,30 +544,6 @@
           setSubmitting(false);
         }
       };
-
-      const filteredProdutos = useMemo(() => {
-        return produtos.filter(p => {
-          const matchSearch = p.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             p.codigo_fornecedor.includes(searchTerm);
-          const matchBrand = !filterBrand || p.marca === filterBrand;
-          return matchSearch && matchBrand;
-        });
-      }, [produtos, searchTerm, filterBrand]);
-
-      const uniqueBrands = useMemo(() => {
-        return [...new Set(produtos.map(p => p.marca))].sort();
-      }, [produtos]);
-
-      if (loading) {
-        return (
-          <div className="flex items-center justify-center h-screen">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
-              <p className="text-gray-600">Carregando produtos...</p>
-            </div>
-          </div>
-        );
-      }
 
       return (
         <div className="p-6 max-w-7xl mx-auto">
