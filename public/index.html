@@ -82,6 +82,7 @@
     const LucideDownload = ({ size = 20, className = '' }) => <SvgIcon size={size} className={className}><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></SvgIcon>;
     const LucideSave = ({ size = 20, className = '' }) => <SvgIcon size={size} className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></SvgIcon>;
     const LucideSettings = ({ size = 20, className = '' }) => <SvgIcon size={size} className={className}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></SvgIcon>;
+    const LucideUserPlus = ({ size = 20, className = '' }) => <SvgIcon size={size} className={className}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></SvgIcon>;
 
     // Supabase client
     const supabaseUrl = 'https://vejkkbotkggviqjempop.supabase.co';
@@ -1411,6 +1412,12 @@
       const [novoLocal, setNovoLocal] = useState({ nome: '', codigo_contrato: '', centro_custo: '', orcamento_mensal: '' });
       const [savingLocal, setSavingLocal] = useState(false);
 
+      const [showNovoUsuario, setShowNovoUsuario] = useState(false);
+      const [novoUsuario, setNovoUsuario] = useState({ nome: '', email: '', password: '', role: 'cliente', local_id: '' });
+      const [savingUsuario, setSavingUsuario] = useState(false);
+      const [editingUserLocal, setEditingUserLocal] = useState(null); // Stores user.id being edited
+      const [selectedLocalForUser, setSelectedLocalForUser] = useState(''); // Stores the new local_id for a user
+
       useEffect(() => {
         fetchData();
       }, []);
@@ -1419,21 +1426,26 @@
         try {
           setLoading(true);
 
-          const { data: usersData } = await supabase
+          const { data: usersData, error: usersError } = await supabase
             .from('perfis')
-            .select('*')
+            .select('*, locais(nome)') // Fetch local name along with user profile
             .eq('ativo', true)
             .order('nome');
 
-          const { data: locaisData } = await supabase
+          if (usersError) throw usersError;
+
+          const { data: locaisData, error: locaisError } = await supabase
             .from('locais')
             .select('*')
             .eq('ativo', true);
+
+          if (locaisError) throw locaisError;
 
           setUsuarios(usersData || []);
           setLocais(locaisData || []);
         } catch (err) {
           console.error('Error fetching data:', err);
+          alert(`Erro ao carregar dados: ${err.message}`);
         } finally {
           setLoading(false);
         }
@@ -1450,7 +1462,7 @@
           if (error) throw error;
           setUsuarios(prev => prev.map(u => u.id === usuario.id ? { ...u, role: novoRole } : u));
         } catch (err) {
-          alert(`Erro: ${err.message}`);
+          alert(`Erro ao alterar role: ${err.message}`);
         }
       };
 
@@ -1464,7 +1476,7 @@
           if (error) throw error;
           setUsuarios(prev => prev.filter(u => u.id !== usuario.id));
         } catch (err) {
-          alert(`Erro: ${err.message}`);
+          alert(`Erro ao desativar usuário: ${err.message}`);
         }
       };
 
@@ -1482,7 +1494,7 @@
           setEditingOrcamento(null);
           setNovoOrcamento('');
         } catch (err) {
-          alert(`Erro: ${err.message}`);
+          alert(`Erro ao salvar orçamento: ${err.message}`);
         } finally {
           setSavingOrcamento(false);
         }
@@ -1504,9 +1516,81 @@
           setShowNovoLocal(false);
           alert('Local criado com sucesso!');
         } catch (err) {
-          alert(`Erro: ${err.message}`);
+          alert(`Erro ao criar local: ${err.message}`);
         } finally {
           setSavingLocal(false);
+        }
+      };
+
+      const handleCriarUsuario = async (e) => {
+        e.preventDefault();
+        if (!novoUsuario.nome || !novoUsuario.email || !novoUsuario.password || !novoUsuario.role || !novoUsuario.local_id) {
+          alert('Preencha todos os campos obrigatórios para o novo usuário.');
+          return;
+        }
+        setSavingUsuario(true);
+        try {
+          // 1. Create user in Supabase Auth
+          const { data: authData, error: authError } = await supabase.auth.signUp({
+            email: novoUsuario.email,
+            password: novoUsuario.password,
+            options: {
+              data: {
+                full_name: novoUsuario.nome, // Store full name in auth metadata
+              },
+            },
+          });
+
+          if (authError) throw authError;
+          if (!authData.user) throw new Error("User creation failed in auth service.");
+
+          // 2. Insert profile into 'perfis' table
+          const { error: profileError } = await supabase
+            .from('perfis')
+            .insert({
+              id: authData.user.id,
+              nome: novoUsuario.nome,
+              email: novoUsuario.email,
+              role: novoUsuario.role,
+              local_id: novoUsuario.local_id,
+              ativo: true,
+            });
+
+          if (profileError) {
+            // If profile insertion fails, consider deleting the auth user to prevent orphaned accounts
+            await supabase.auth.admin.deleteUser(authData.user.id);
+            throw profileError;
+          }
+
+          alert('Usuário criado com sucesso! Um e-mail de confirmação foi enviado.');
+          setNovoUsuario({ nome: '', email: '', password: '', role: 'cliente', local_id: '' });
+          setShowNovoUsuario(false);
+          fetchData(); // Refresh user list
+        } catch (err) {
+          console.error('Error creating user:', err);
+          alert(`Erro ao criar usuário: ${err.message}`);
+        } finally {
+          setSavingUsuario(false);
+        }
+      };
+
+      const handleSaveUserLocal = async (userId) => {
+        if (!selectedLocalForUser) {
+          alert('Selecione um local para o usuário.');
+          return;
+        }
+        try {
+          const { error } = await supabase
+            .from('perfis')
+            .update({ local_id: selectedLocalForUser })
+            .eq('id', userId);
+          if (error) throw error;
+          alert('Local do usuário atualizado com sucesso!');
+          setEditingUserLocal(null);
+          setSelectedLocalForUser('');
+          fetchData(); // Refresh user list to show updated local name
+        } catch (err) {
+          alert(`Erro ao atualizar local do usuário: ${err.message}`);
         }
       };
 
@@ -1527,15 +1611,145 @@
 
           {/* Users Section */}
           <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-            <h3 className="text-xl font-semibold text-gray-800 mb-4">Usuários</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-gray-800">Usuários</h3>
+              <button
+                onClick={() => setShowNovoUsuario(!showNovoUsuario)}
+                className="flex items-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition text-sm font-medium"
+              >
+                <LucideUserPlus size={16} />
+                Novo Usuário
+              </button>
+            </div>
+
+            {/* Formulário Novo Usuário */}
+            {showNovoUsuario && (
+              <form onSubmit={handleCriarUsuario} className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <h4 className="font-semibold text-blue-900 mb-3">Adicionar Novo Usuário</h4>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nome Completo *</label>
+                    <input
+                      type="text"
+                      value={novoUsuario.nome}
+                      onChange={e => setNovoUsuario(prev => ({ ...prev, nome: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="Ex: João da Silva"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                    <input
+                      type="email"
+                      value={novoUsuario.email}
+                      onChange={e => setNovoUsuario(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="exemplo@email.com"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Senha *</label>
+                    <input
+                      type="password"
+                      value={novoUsuario.password}
+                      onChange={e => setNovoUsuario(prev => ({ ...prev, password: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="Mínimo 6 caracteres"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+                    <select
+                      value={novoUsuario.role}
+                      onChange={e => setNovoUsuario(prev => ({ ...prev, role: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      required
+                    >
+                      <option value="cliente">Cliente</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Local de Atuação *</label>
+                    <select
+                      value={novoUsuario.local_id}
+                      onChange={e => setNovoUsuario(prev => ({ ...prev, local_id: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      required
+                    >
+                      <option value="">Selecione um local</option>
+                      {locais.map(local => (
+                        <option key={local.id} value={local.id}>{local.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={savingUsuario}
+                    className="bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 disabled:bg-gray-400 transition text-sm font-medium"
+                  >
+                    {savingUsuario ? 'Salvando...' : 'Criar Usuário'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowNovoUsuario(false); setNovoUsuario({ nome: '', email: '', password: '', role: 'cliente', local_id: '' }); }}
+                    className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition text-sm font-medium"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            )}
+
             <div className="space-y-3">
               {usuarios.map(usuario => (
                 <div key={usuario.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <div>
                     <p className="font-medium text-gray-900">{usuario.nome}</p>
                     <p className="text-sm text-gray-600">{usuario.email}</p>
+                    <p className="text-xs text-gray-500">Local: {usuario.locais?.nome || 'Nenhum'}</p>
                   </div>
                   <div className="flex items-center gap-3">
+                    {editingUserLocal === usuario.id ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={selectedLocalForUser}
+                          onChange={e => setSelectedLocalForUser(e.target.value)}
+                          className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        >
+                          <option value="">Selecione</option>
+                          {locais.map(local => (
+                            <option key={local.id} value={local.id}>{local.nome}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => handleSaveUserLocal(usuario.id)}
+                          className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition"
+                        >
+                          Salvar
+                        </button>
+                        <button
+                          onClick={() => { setEditingUserLocal(null); setSelectedLocalForUser(''); }}
+                          className="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm hover:bg-gray-400 transition"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setEditingUserLocal(usuario.id); setSelectedLocalForUser(usuario.local_id || ''); }}
+                        className="text-sm px-3 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100 transition"
+                        title="Alterar local do usuário"
+                      >
+                        Alterar Local
+                      </button>
+                    )}
+
                     <span className={`text-sm font-medium px-3 py-1 rounded border ${
                       usuario.role === 'admin'
                         ? 'bg-blue-50 text-blue-800 border-blue-200'
