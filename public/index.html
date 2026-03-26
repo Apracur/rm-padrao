@@ -1,0 +1,1728 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RM - Requisição de Material - Ello Atacadão</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React and ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Supabase JS -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+  <!-- SheetJS for Excel -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    .currency-input {
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+    const { createClient } = window.supabase;
+
+    // Supabase client
+    const supabaseUrl = 'https://vejkkbotkggviqjempop.supabase.co';
+    const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZlamtrYm90a2dndmlxamVtcG9wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNTQ1OTYsImV4cCI6MjA4OTkzMDU5Nn0.ljUybue8QVKhZKftKzI6IDAKZZNOOHFnzq588RM4l18';
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    // Utility functions
+    const formatCurrency = (value) => {
+      if (!value) return 'R$ 0,00';
+      return new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+      }).format(value);
+    };
+
+    const formatDate = (dateString) => {
+      if (!dateString) return '';
+      const date = new Date(dateString);
+      return date.toLocaleDateString('pt-BR');
+    };
+
+    const getMonthName = (monthStr) => {
+      const months = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      ];
+      if (!monthStr) return '';
+      const [year, month] = monthStr.split('-');
+      return `${months[parseInt(month) - 1]}/${year}`;
+    };
+
+    // Login Component
+    function LoginPage({ onLogin }) {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+
+        try {
+          const { data, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+
+          if (authError) throw authError;
+          if (data.user) {
+            onLogin(data.user);
+          }
+        } catch (err) {
+          setError(err.message || 'Erro ao fazer login');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100 p-4">
+          <div className="w-full max-w-md">
+            <div className="bg-white rounded-lg shadow-xl p-8">
+              <div className="text-center mb-8">
+                <div className="inline-block bg-blue-800 text-white rounded-lg px-4 py-2 mb-4">
+                  <h1 className="text-2xl font-bold">Ello Atacadão</h1>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-800">Requisição de Material</h2>
+                <p className="text-gray-600 mt-2">FM2C - Bridgestone em Camaçari</p>
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+                  <span className="text-red-600 text-xl">⚠️</span>
+                  <p className="text-red-700">{error}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    E-mail
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                    placeholder="seu@email.com"
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Senha
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                    placeholder="••••••••"
+                    disabled={loading}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-blue-800 text-white py-2 rounded-lg font-medium hover:bg-blue-900 disabled:bg-gray-400 transition duration-200"
+                >
+                  {loading ? 'Fazendo login...' : 'Entrar'}
+                </button>
+              </form>
+
+              <p className="text-center text-gray-600 text-sm mt-6">
+                Versão 1.0 | Sistema de Requisição de Material
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Sidebar Component
+    function Sidebar({ user, userRole, onLogout, currentPage, onPageChange }) {
+      const [userProfile, setUserProfile] = useState(null);
+
+      useEffect(() => {
+        if (user) {
+          fetchUserProfile();
+        }
+      }, [user]);
+
+      const fetchUserProfile = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('perfis')
+            .select('*')
+            .eq('email', user.email)
+            .single();
+
+          if (data) setUserProfile(data);
+        } catch (err) {
+          console.error('Error fetching profile:', err);
+        }
+      };
+
+      const menuItems = [
+        { id: 'nova-requisicao', label: 'Nova Requisição', icon: 'Plus' },
+        { id: 'meus-pedidos', label: 'Meus Pedidos', icon: 'FileText' },
+      ];
+
+      if (userRole === 'admin') {
+        menuItems.push(
+          { id: 'estoque', label: 'Estoque', icon: 'Package' },
+          { id: 'configuracoes', label: 'Configurações', icon: 'Settings' }
+        );
+      }
+
+      return (
+        <div className="w-64 bg-blue-800 text-white flex flex-col h-screen shadow-lg">
+          <div className="p-6 border-b border-blue-700">
+            <h1 className="font-bold text-xl mb-2">Ello Atacadão</h1>
+            <p className="text-blue-100 text-sm">RM - Requisição de Material</p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            <nav className="p-4 space-y-2">
+              {menuItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => onPageChange(item.id)}
+                  className={`w-full text-left px-4 py-3 rounded-lg transition duration-200 flex items-center gap-3 ${
+                    currentPage === item.id
+                      ? 'bg-blue-900 font-medium'
+                      : 'hover:bg-blue-700'
+                  }`}
+                >
+                  <lucide.icons[item.icon] size={20} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          <div className="p-4 border-t border-blue-700 space-y-4">
+            {userProfile && (
+              <div className="bg-blue-700 rounded-lg p-3 text-sm">
+                <p className="font-medium text-blue-100">Usuário</p>
+                <p className="text-white font-semibold truncate">{userProfile.nome || 'Usuário'}</p>
+                <p className="text-blue-100 text-xs mt-1">
+                  {userRole === 'admin' ? 'Administrador' : 'Cliente'}
+                </p>
+              </div>
+            )}
+            <button
+              onClick={onLogout}
+              className="w-full bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition duration-200 flex items-center justify-center gap-2"
+            >
+              <lucide.icons.LogOut size={18} />
+              <span>Sair</span>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Nova Requisição Component
+    function NovaRequisicao({ user, userRole }) {
+      const [produtos, setProdutos] = useState([]);
+      const [estoque, setEstoque] = useState({});
+      const [cartItems, setCartItems] = useState({});
+      const [searchTerm, setSearchTerm] = useState('');
+      const [filterBrand, setFilterBrand] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [mesReferencia, setMesReferencia] = useState('');
+      const [observacoes, setObservacoes] = useState('');
+      const [showSuccess, setShowSuccess] = useState(false);
+      const [successMessage, setSuccessMessage] = useState('');
+      const [lastPedido, setLastPedido] = useState(null);
+      const [userLocalId, setUserLocalId] = useState(null);
+      const [submitting, setSubmitting] = useState(false);
+
+      const ORCAMENTO = 20000;
+      const CLIENTE = 'FM2C';
+      const LOCAL = 'Bridgestone em Camaçari';
+
+      useEffect(() => {
+        if (user) {
+          getUserLocalId();
+        }
+      }, [user]);
+
+      const getUserLocalId = async () => {
+        try {
+          const { data } = await supabase
+            .from('perfis')
+            .select('local_id')
+            .eq('email', user.email)
+            .single();
+
+          if (data) setUserLocalId(data.local_id);
+        } catch (err) {
+          console.error('Error getting user local_id:', err);
+        }
+      };
+
+      useEffect(() => {
+        if (userLocalId) {
+          fetchProdutosAndEstoque();
+        }
+      }, [userLocalId]);
+
+      const fetchProdutosAndEstoque = async () => {
+        try {
+          setLoading(true);
+
+          const { data: prodData, error: prodError } = await supabase
+            .from('produtos')
+            .select('*')
+            .eq('ativo', true);
+
+          if (prodError) throw prodError;
+          setProdutos(prodData || []);
+
+          const { data: estData, error: estError } = await supabase
+            .from('estoque')
+            .select('produto_id, quantidade')
+            .eq('local_id', userLocalId);
+
+          if (estError) throw estError;
+
+          const estoqueMap = {};
+          (estData || []).forEach(item => {
+            estoqueMap[item.produto_id] = item.quantidade;
+          });
+          setEstoque(estoqueMap);
+        } catch (err) {
+          console.error('Error fetching data:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleQuantityChange = (produtoId, value) => {
+        const qty = parseInt(value) || 0;
+        if (qty > 0) {
+          setCartItems(prev => ({
+            ...prev,
+            [produtoId]: qty
+          }));
+        } else {
+          setCartItems(prev => {
+            const updated = { ...prev };
+            delete updated[produtoId];
+            return updated;
+          });
+        }
+      };
+
+      const totalValue = useMemo(() => {
+        return Object.entries(cartItems).reduce((sum, [prodId, qty]) => {
+          const produto = produtos.find(p => p.id === prodId);
+          return sum + (produto ? produto.preco_unitario * qty : 0);
+        }, 0);
+      }, [cartItems, produtos]);
+
+      const saldoRestante = ORCAMENTO - totalValue;
+      const exceedsBudget = totalValue > ORCAMENTO;
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+
+        if (Object.keys(cartItems).length === 0) {
+          alert('Adicione pelo menos um produto ao pedido');
+          return;
+        }
+
+        if (!mesReferencia) {
+          alert('Selecione o mês de referência');
+          return;
+        }
+
+        setSubmitting(true);
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+
+          const { data: pedido, error: pedidoError } = await supabase
+            .from('pedidos')
+            .insert([{
+              numero_pedido: `RM-${Date.now()}`,
+              local_id: userLocalId,
+              usuario_id: authUser.id,
+              mes_referencia: mesReferencia,
+              valor_total: totalValue,
+              orcamento: ORCAMENTO,
+              status: 'pendente',
+              observacoes: observacoes,
+              centro_custo: CLIENTE
+            }])
+            .select()
+            .single();
+
+          if (pedidoError) throw pedidoError;
+
+          const itens = Object.entries(cartItems).map(([prodId, qty]) => {
+            const produto = produtos.find(p => p.id === prodId);
+            return {
+              pedido_id: pedido.id,
+              produto_id: prodId,
+              quantidade: qty,
+              preco_unitario: produto.preco_unitario,
+              preco_total: produto.preco_unitario * qty
+            };
+          });
+
+          const { error: itensError } = await supabase
+            .from('itens_pedido')
+            .insert(itens);
+
+          if (itensError) throw itensError;
+
+          const numeroPedido = pedido.numero_pedido;
+          const valorTotal = totalValue;
+          setSuccessMessage(`Pedido ${numeroPedido} criado com sucesso!`);
+          setLastPedido({ numero: numeroPedido, valor: valorTotal, mes: mesReferencia });
+          setShowSuccess(true);
+          setCartItems({});
+          setMesReferencia('');
+          setObservacoes('');
+
+          setTimeout(() => setShowSuccess(false), 8000);
+        } catch (err) {
+          console.error('Error creating order:', err);
+          alert(`Erro ao criar pedido: ${err.message}`);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      const filteredProdutos = useMemo(() => {
+        return produtos.filter(p => {
+          const matchSearch = p.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             p.codigo_fornecedor.includes(searchTerm);
+          const matchBrand = !filterBrand || p.marca === filterBrand;
+          return matchSearch && matchBrand;
+        });
+      }, [produtos, searchTerm, filterBrand]);
+
+      const uniqueBrands = useMemo(() => {
+        return [...new Set(produtos.map(p => p.marca))].sort();
+      }, [produtos]);
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
+              <p className="text-gray-600">Carregando produtos...</p>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-6 max-w-7xl mx-auto">
+          {showSuccess && (
+            <div className="fixed top-4 right-4 bg-green-50 border border-green-200 rounded-lg p-4 flex flex-col gap-3 max-w-md shadow-lg">
+              <div className="flex items-start gap-3">
+                <span className="text-green-600 text-xl">✓</span>
+                <div>
+                  <p className="font-medium text-green-800">{successMessage}</p>
+                  <p className="text-sm text-green-700 mt-1">Pedido registrado com sucesso!</p>
+                </div>
+              </div>
+              {lastPedido && (
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(`📦 *Requisição de Material - Ello Atacadão*
+
+Pedido: ${lastPedido.numero}
+Mês Ref.: ${getMonthName(lastPedido.mes)}
+Valor Total: ${formatCurrency(lastPedido.valor)}
+Cliente: FM2C - Bridgestone em Camaçari
+
+✅ Aguardando aprovação.`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                >
+                  📱 Compartilhar no WhatsApp
+                </a>
+              )}
+            </div>
+          )}
+
+          <h2 className="text-3xl font-bold text-gray-800 mb-6">Nova Requisição</h2>
+
+          {/* Budget Summary */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="bg-white rounded-lg p-4 border border-gray-200">
+              <p className="text-gray-600 text-sm mb-1">Orçamento Disponível</p>
+              <p className="text-2xl font-bold text-blue-800">{formatCurrency(ORCAMENTO)}</p>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-gray-200">
+              <p className="text-gray-600 text-sm mb-1">Total do Pedido</p>
+              <p className="text-2xl font-bold text-gray-800">{formatCurrency(totalValue)}</p>
+            </div>
+            <div className={`rounded-lg p-4 border-2 ${
+              exceedsBudget
+                ? 'bg-red-50 border-red-200'
+                : 'bg-green-50 border-green-200'
+            }`}>
+              <p className={`text-sm mb-1 ${exceedsBudget ? 'text-red-600' : 'text-green-600'}`}>
+                Saldo Restante
+              </p>
+              <p className={`text-2xl font-bold ${exceedsBudget ? 'text-red-800' : 'text-green-800'}`}>
+                {formatCurrency(Math.max(0, saldoRestante))}
+              </p>
+            </div>
+          </div>
+
+          {exceedsBudget && (
+            <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-6 rounded">
+              <div className="flex gap-3">
+                <span className="text-2xl">⚠️</span>
+                <div>
+                  <p className="font-medium text-amber-800">Orçamento Excedido</p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    O valor total do pedido ({formatCurrency(totalValue)}) excede o orçamento disponível.
+                    Reduza a quantidade de produtos ou remova alguns itens.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Date and Observations */}
+            <div className="grid grid-cols-2 gap-6 bg-white rounded-lg p-6 border border-gray-200">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Mês de Referência
+                </label>
+                <input
+                  type="month"
+                  value={mesReferencia}
+                  onChange={(e) => setMesReferencia(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Cliente
+                </label>
+                <input
+                  type="text"
+                  value={CLIENTE}
+                  disabled
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-6 border border-gray-200">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Observações
+              </label>
+              <textarea
+                value={observacoes}
+                onChange={(e) => setObservacoes(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                rows="3"
+                placeholder="Adicione observações sobre o pedido..."
+              />
+            </div>
+
+            {/* Search and Filter */}
+            <div className="grid grid-cols-2 gap-4 bg-white rounded-lg p-6 border border-gray-200">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Buscar Produto
+                </label>
+                <div className="relative">
+                  <lucide.icons.Search className="absolute left-3 top-3 text-gray-400" size={20} />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Código ou descrição..."
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Filtrar por Marca
+                </label>
+                <select
+                  value={filterBrand}
+                  onChange={(e) => setFilterBrand(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="">Todas as marcas</option>
+                  {uniqueBrands.map(brand => (
+                    <option key={brand} value={brand}>{brand}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Products Table */}
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-700">Código</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-700">Descrição</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-700">Marca</th>
+                      <th className="px-6 py-3 text-left font-semibold text-gray-700">Unidade</th>
+                      <th className="px-6 py-3 text-right font-semibold text-gray-700">Preço Unit.</th>
+                      <th className="px-6 py-3 text-center font-semibold text-gray-700">Estoque</th>
+                      <th className="px-6 py-3 text-center font-semibold text-gray-700">Qtd.</th>
+                      <th className="px-6 py-3 text-right font-semibold text-gray-700">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filteredProdutos.map(produto => {
+                      const qty = cartItems[produto.id] || 0;
+                      const qtdEstoque = estoque[produto.id] || 0;
+                      const subtotal = produto.preco_unitario * qty;
+
+                      return (
+                        <tr key={produto.id} className="hover:bg-blue-50 transition">
+                          <td className="px-6 py-4 font-medium text-gray-900">{produto.codigo_fornecedor}</td>
+                          <td className="px-6 py-4 text-gray-700">{produto.nome}</td>
+                          <td className="px-6 py-4 text-gray-600">{produto.marca}</td>
+                          <td className="px-6 py-4 text-gray-600">{produto.unidade}</td>
+                          <td className="px-6 py-4 text-right font-medium text-gray-800">
+                            {formatCurrency(produto.preco_unitario)}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                              qtdEstoque === 0
+                                ? 'bg-red-100 text-red-800'
+                                : qtdEstoque < 10
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-green-100 text-green-800'
+                            }`}>
+                              {qtdEstoque}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <input
+                              type="number"
+                              min="0"
+                              value={qty}
+                              onChange={(e) => handleQuantityChange(produto.id, e.target.value)}
+                              className="w-20 px-2 py-1 border border-gray-300 rounded text-center focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                          </td>
+                          <td className="px-6 py-4 text-right font-semibold text-gray-900">
+                            {formatCurrency(subtotal)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {filteredProdutos.length === 0 && (
+                <div className="text-center py-12">
+                  <lucide.icons.Package size={48} className="mx-auto text-gray-300 mb-3" />
+                  <p className="text-gray-500">Nenhum produto encontrado</p>
+                </div>
+              )}
+            </div>
+
+            {/* Submit Button */}
+            <div className="flex gap-4">
+              <button
+                type="submit"
+                disabled={submitting || Object.keys(cartItems).length === 0}
+                className="flex-1 bg-blue-800 text-white py-3 rounded-lg font-semibold hover:bg-blue-900 disabled:bg-gray-400 transition duration-200 flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <lucide.icons.Check size={20} />
+                    Finalizar Pedido
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      );
+    }
+
+    // Meus Pedidos Component
+    function MeusPedidos({ user, userRole }) {
+      const [pedidos, setPedidos] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [expandedId, setExpandedId] = useState(null);
+      const [itensPedido, setItensPedido] = useState({});
+      const [changeStatus, setChangeStatus] = useState({});
+
+      const ORCAMENTO = 20000;
+
+      useEffect(() => {
+        if (user) {
+          fetchPedidos();
+        }
+      }, [user, userRole]);
+
+      const fetchPedidos = async () => {
+        try {
+          setLoading(true);
+          let query = supabase
+            .from('pedidos')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (userRole !== 'admin') {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            query = query.eq('usuario_id', authUser.id);
+          }
+
+          const { data, error } = await query;
+          if (error) throw error;
+          setPedidos(data || []);
+        } catch (err) {
+          console.error('Error fetching pedidos:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const fetchItensPedido = async (pedidoId) => {
+        try {
+          const { data, error } = await supabase
+            .from('itens_pedido')
+            .select('*, produtos(nome, codigo_fornecedor)')
+            .eq('pedido_id', pedidoId);
+
+          if (error) throw error;
+          setItensPedido(prev => ({
+            ...prev,
+            [pedidoId]: data || []
+          }));
+        } catch (err) {
+          console.error('Error fetching itens:', err);
+        }
+      };
+
+      const handleExpandClick = (pedidoId) => {
+        if (expandedId === pedidoId) {
+          setExpandedId(null);
+        } else {
+          setExpandedId(pedidoId);
+          if (!itensPedido[pedidoId]) {
+            fetchItensPedido(pedidoId);
+          }
+        }
+      };
+
+      const handleStatusChange = async (pedidoId, newStatus) => {
+        try {
+          const { error } = await supabase
+            .from('pedidos')
+            .update({ status: newStatus })
+            .eq('id', pedidoId);
+
+          if (error) throw error;
+
+          setPedidos(prev => prev.map(p =>
+            p.id === pedidoId ? { ...p, status: newStatus } : p
+          ));
+          setChangeStatus(prev => {
+            const updated = { ...prev };
+            delete updated[pedidoId];
+            return updated;
+          });
+        } catch (err) {
+          console.error('Error updating status:', err);
+          alert('Erro ao atualizar status');
+        }
+      };
+
+      const getStatusColor = (status) => {
+        switch (status) {
+          case 'pendente':
+            return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+          case 'aprovado':
+            return 'bg-green-100 text-green-800 border-green-300';
+          case 'entregue':
+            return 'bg-blue-100 text-blue-800 border-blue-300';
+          case 'cancelado':
+            return 'bg-red-100 text-red-800 border-red-300';
+          default:
+            return 'bg-gray-100 text-gray-800 border-gray-300';
+        }
+      };
+
+      const getStatusLabel = (status) => {
+        switch (status) {
+          case 'pendente':
+            return 'Pendente';
+          case 'aprovado':
+            return 'Aprovado';
+          case 'entregue':
+            return 'Entregue';
+          case 'cancelado':
+            return 'Cancelado';
+          default:
+            return status;
+        }
+      };
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
+              <p className="text-gray-600">Carregando pedidos...</p>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-6 max-w-6xl mx-auto">
+          <h2 className="text-3xl font-bold text-gray-800 mb-6">Meus Pedidos</h2>
+
+          {pedidos.length === 0 ? (
+            <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+              <lucide.icons.FileText size={48} className="mx-auto text-gray-300 mb-3" />
+              <p className="text-gray-500">Nenhum pedido encontrado</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {pedidos.map(pedido => (
+                <div key={pedido.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                  <button
+                    onClick={() => handleExpandClick(pedido.id)}
+                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition"
+                  >
+                    <div className="flex items-center gap-6 flex-1 text-left">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900">{pedido.numero_pedido}</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {formatDate(pedido.created_at)} • {getMonthName(pedido.mes_referencia)}
+                        </p>
+                      </div>
+                      <div className="hidden sm:block">
+                        <p className="text-2xl font-bold text-gray-900">{formatCurrency(pedido.valor_total)}</p>
+                        <p className="text-xs text-gray-500 mt-1">Orçamento: {formatCurrency(pedido.orcamento)}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <span className={`px-4 py-2 rounded-full text-sm font-medium border ${getStatusColor(pedido.status)}`}>
+                        {getStatusLabel(pedido.status)}
+                      </span>
+                      <lucide.icons.ChevronDown
+                        size={24}
+                        className={`text-gray-400 transition ${expandedId === pedido.id ? 'rotate-180' : ''}`}
+                      />
+                    </div>
+                  </button>
+
+                  {expandedId === pedido.id && (
+                    <div className="border-t border-gray-200 px-6 py-4 bg-gray-50">
+                      {/* Order Details */}
+                      <div className="grid grid-cols-2 gap-4 mb-6">
+                        <div>
+                          <p className="text-sm text-gray-600">Local</p>
+                          <p className="font-medium text-gray-900">Bridgestone em Camaçari</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-600">Centro de Custo</p>
+                          <p className="font-medium text-gray-900">{pedido.centro_custo}</p>
+                        </div>
+                      </div>
+
+                      {/* Items */}
+                      <div className="mb-6">
+                        <h4 className="font-semibold text-gray-900 mb-3">Itens do Pedido</h4>
+                        {itensPedido[pedido.id] ? (
+                          <div className="space-y-2">
+                            {itensPedido[pedido.id].map(item => (
+                              <div key={item.id} className="flex items-center justify-between bg-white p-3 rounded border border-gray-200">
+                                <div>
+                                  <p className="font-medium text-gray-900">{item.produtos.nome}</p>
+                                  <p className="text-sm text-gray-600">{item.produtos.codigo_fornecedor}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-medium text-gray-900">{item.quantidade} un.</p>
+                                  <p className="text-sm text-gray-600">{formatCurrency(item.preco_total)}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-gray-600 text-sm">Carregando itens...</p>
+                        )}
+                      </div>
+
+                      {pedido.observacoes && (
+                        <div className="mb-6">
+                          <p className="text-sm text-gray-600 mb-1">Observações</p>
+                          <p className="text-gray-900 bg-white p-3 rounded border border-gray-200">{pedido.observacoes}</p>
+                        </div>
+                      )}
+
+                      {/* WhatsApp Share Button */}
+                      <div className="mb-4">
+                        <a
+                          href={`https://wa.me/?text=${encodeURIComponent(`📦 *Requisição de Material - Ello Atacadão*
+
+Pedido: ${pedido.numero_pedido}
+Data: ${formatDate(pedido.created_at)}
+Mês Ref.: ${getMonthName(pedido.mes_referencia)}
+Valor Total: ${formatCurrency(pedido.valor_total)}
+Status: ${getStatusLabel(pedido.status)}
+Cliente: ${pedido.centro_custo}`)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                        >
+                          📱 Compartilhar no WhatsApp
+                        </a>
+                      </div>
+
+                      {/* Status Change (Admin Only) */}
+                      {userRole === 'admin' && (
+                        <div className="border-t pt-4">
+                          <p className="text-sm font-medium text-gray-700 mb-3">Alterar Status</p>
+                          <div className="flex gap-2">
+                            {['pendente', 'aprovado', 'entregue', 'cancelado'].map(status => (
+                              <button
+                                key={status}
+                                onClick={() => handleStatusChange(pedido.id, status)}
+                                className={`px-3 py-2 rounded text-sm font-medium transition ${
+                                  pedido.status === status
+                                    ? `${getStatusColor(status)} border`
+                                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                }`}
+                              >
+                                {getStatusLabel(status)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Estoque Component (Admin Only)
+    function Estoque() {
+      const [produtos, setProdutos] = useState([]);
+      const [estoque, setEstoque] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [changes, setChanges] = useState({});
+      const [saving, setSaving] = useState(false);
+      const [uploadingFile, setUploadingFile] = useState(false);
+      const fileInputRef = useRef();
+
+      useEffect(() => {
+        fetchData();
+      }, []);
+
+      const fetchData = async () => {
+        try {
+          setLoading(true);
+
+          const { data: prodData } = await supabase
+            .from('produtos')
+            .select('*')
+            .eq('ativo', true)
+            .order('nome');
+
+          const { data: estData } = await supabase
+            .from('estoque')
+            .select('*');
+
+          setProdutos(prodData || []);
+          setEstoque(estData || []);
+        } catch (err) {
+          console.error('Error fetching data:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const getEstoqueForProduct = (produtoId) => {
+        return estoque.find(e => e.produto_id === produtoId);
+      };
+
+      const handleQuantityChange = (estoqueId, produtoId, localId, newQty) => {
+        setChanges(prev => ({
+          ...prev,
+          [estoqueId]: {
+            estoqueId,
+            produtoId,
+            localId,
+            novaQuantidade: parseInt(newQty) || 0,
+            quantidadeAnterior: estoque.find(e => e.id === estoqueId)?.quantidade || 0
+          }
+        }));
+
+        setEstoque(prev => prev.map(e =>
+          e.id === estoqueId ? { ...e, quantidade: parseInt(newQty) || 0 } : e
+        ));
+      };
+
+      const handleSaveChanges = async () => {
+        if (Object.keys(changes).length === 0) {
+          alert('Nenhuma alteração foi feita');
+          return;
+        }
+
+        setSaving(true);
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+
+          for (const change of Object.values(changes)) {
+            const { error: updateError } = await supabase
+              .from('estoque')
+              .update({ quantidade: change.novaQuantidade })
+              .eq('id', change.estoqueId);
+
+            if (updateError) throw updateError;
+
+            const { error: movError } = await supabase
+              .from('estoque_movimentacoes')
+              .insert([{
+                estoque_id: change.estoqueId,
+                tipo: 'ajuste',
+                quantidade: change.novaQuantidade - change.quantidadeAnterior,
+                quantidade_anterior: change.quantidadeAnterior,
+                quantidade_nova: change.novaQuantidade,
+                observacao: 'Ajuste manual de estoque',
+                usuario_id: authUser.id
+              }]);
+
+            if (movError) throw movError;
+          }
+
+          setChanges({});
+          fetchData();
+          alert('Alterações salvas com sucesso!');
+        } catch (err) {
+          console.error('Error saving changes:', err);
+          alert(`Erro ao salvar: ${err.message}`);
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      const handleFileUpload = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setUploadingFile(true);
+        try {
+          const reader = new FileReader();
+          reader.onload = async (e) => {
+            try {
+              const data = new Uint8Array(e.target.result);
+              const workbook = XLSX.read(data, { type: 'array' });
+              const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+              const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+              const updates = [];
+              for (const row of jsonData) {
+                const codigo = row['Código'] || row['codigo_fornecedor'];
+                const quantidade = parseInt(row['Quantidade'] || row['Estoque']) || 0;
+
+                const produto = produtos.find(p => p.codigo_fornecedor === codigo);
+                if (!produto) {
+                  console.warn(`Produto com código ${codigo} não encontrado`);
+                  continue;
+                }
+
+                const estoqueItem = estoque.find(e => e.produto_id === produto.id);
+                if (estoqueItem) {
+                  updates.push({
+                    estoqueId: estoqueItem.id,
+                    produtoId: produto.id,
+                    localId: estoqueItem.local_id,
+                    novaQuantidade: quantidade,
+                    quantidadeAnterior: estoqueItem.quantidade
+                  });
+                }
+              }
+
+              if (updates.length === 0) {
+                alert('Nenhum produto foi encontrado para importação');
+                return;
+              }
+
+              const confirmMsg = `Deseja importar ${updates.length} produtos?\n\nEsta ação atualizará as quantidades de estoque.`;
+              if (confirm(confirmMsg)) {
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+
+                for (const update of updates) {
+                  await supabase
+                    .from('estoque')
+                    .update({ quantidade: update.novaQuantidade })
+                    .eq('id', update.estoqueId);
+
+                  await supabase
+                    .from('estoque_movimentacoes')
+                    .insert([{
+                      estoque_id: update.estoqueId,
+                      tipo: 'importacao',
+                      quantidade: update.novaQuantidade - update.quantidadeAnterior,
+                      quantidade_anterior: update.quantidadeAnterior,
+                      quantidade_nova: update.novaQuantidade,
+                      observacao: 'Importação de planilha Excel',
+                      usuario_id: authUser.id
+                    }]);
+                }
+
+                fetchData();
+                alert('Importação realizada com sucesso!');
+              }
+            } catch (err) {
+              console.error('Error processing file:', err);
+              alert(`Erro ao processar arquivo: ${err.message}`);
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        } finally {
+          setUploadingFile(false);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
+        }
+      };
+
+      const handleExport = () => {
+        const data = estoque.map(e => {
+          const produto = produtos.find(p => p.id === e.produto_id);
+          return {
+            'Código': produto?.codigo_fornecedor,
+            'Descrição': produto?.nome,
+            'Marca': produto?.marca,
+            'Unidade': produto?.unidade,
+            'Estoque': e.quantidade,
+            'Quantidade Mínima': e.quantidade_minima,
+            'Última Atualização': formatDate(e.updated_at)
+          };
+        });
+
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Estoque');
+        XLSX.writeFile(workbook, `estoque-${new Date().toISOString().split('T')[0]}.xlsx`);
+      };
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
+              <p className="text-gray-600">Carregando estoque...</p>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-6 max-w-7xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-3xl font-bold text-gray-800">Gestão de Estoque</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingFile}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition duration-200 flex items-center gap-2"
+              >
+                <lucide.icons.Upload size={20} />
+                {uploadingFile ? 'Importando...' : 'Importar Excel'}
+              </button>
+              <button
+                onClick={handleExport}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition duration-200 flex items-center gap-2"
+              >
+                <lucide.icons.Download size={20} />
+                Exportar Excel
+              </button>
+            </div>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-3 text-left font-semibold text-gray-700">Código</th>
+                    <th className="px-6 py-3 text-left font-semibold text-gray-700">Descrição</th>
+                    <th className="px-6 py-3 text-left font-semibold text-gray-700">Marca</th>
+                    <th className="px-6 py-3 text-center font-semibold text-gray-700">Unidade</th>
+                    <th className="px-6 py-3 text-center font-semibold text-gray-700">Estoque</th>
+                    <th className="px-6 py-3 text-center font-semibold text-gray-700">Quantidade Mínima</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {produtos.map(produto => {
+                    const estoqueItem = getEstoqueForProduct(produto.id);
+                    const qty = estoqueItem?.quantidade || 0;
+                    const minQty = estoqueItem?.quantidade_minima || 0;
+
+                    let qtyColor = 'bg-green-100 text-green-800';
+                    if (qty === 0) {
+                      qtyColor = 'bg-red-100 text-red-800';
+                    } else if (qty < minQty) {
+                      qtyColor = 'bg-amber-100 text-amber-800';
+                    }
+
+                    return (
+                      <tr key={produto.id} className="hover:bg-gray-50 transition">
+                        <td className="px-6 py-4 font-medium text-gray-900">{produto.codigo_fornecedor}</td>
+                        <td className="px-6 py-4 text-gray-700">{produto.nome}</td>
+                        <td className="px-6 py-4 text-gray-600">{produto.marca}</td>
+                        <td className="px-6 py-4 text-center text-gray-600">{produto.unidade}</td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            min="0"
+                            value={qty}
+                            onChange={(e) => {
+                              if (estoqueItem) {
+                                handleQuantityChange(estoqueItem.id, produto.id, estoqueItem.local_id, e.target.value);
+                              }
+                            }}
+                            className={`w-24 px-3 py-2 border rounded text-center focus:ring-2 focus:ring-blue-500 outline-none ${qtyColor}`}
+                          />
+                        </td>
+                        <td className="px-6 py-4 text-center text-gray-600">{minQty}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {Object.keys(changes).length > 0 && (
+            <div className="mt-6 flex gap-4">
+              <button
+                onClick={handleSaveChanges}
+                disabled={saving}
+                className="bg-blue-800 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-900 disabled:bg-gray-400 transition duration-200 flex items-center gap-2"
+              >
+                {saving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <lucide.icons.Save size={20} />
+                    Salvar Alterações ({Object.keys(changes).length})
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setChanges({});
+                  fetchData();
+                }}
+                className="bg-gray-300 text-gray-800 px-6 py-3 rounded-lg font-semibold hover:bg-gray-400 transition duration-200"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Configurações Component (Admin Only)
+    function Configuracoes() {
+      const [usuarios, setUsuarios] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [locais, setLocais] = useState([]);
+      const [editingOrcamento, setEditingOrcamento] = useState(null);
+      const [novoOrcamento, setNovoOrcamento] = useState('');
+      const [savingOrcamento, setSavingOrcamento] = useState(false);
+      const [showNovoLocal, setShowNovoLocal] = useState(false);
+      const [novoLocal, setNovoLocal] = useState({ nome: '', codigo_contrato: '', centro_custo: '', orcamento_mensal: '' });
+      const [savingLocal, setSavingLocal] = useState(false);
+
+      useEffect(() => {
+        fetchData();
+      }, []);
+
+      const fetchData = async () => {
+        try {
+          setLoading(true);
+
+          const { data: usersData } = await supabase
+            .from('perfis')
+            .select('*')
+            .eq('ativo', true)
+            .order('nome');
+
+          const { data: locaisData } = await supabase
+            .from('locais')
+            .select('*')
+            .eq('ativo', true);
+
+          setUsuarios(usersData || []);
+          setLocais(locaisData || []);
+        } catch (err) {
+          console.error('Error fetching data:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleToggleRole = async (usuario) => {
+        const novoRole = usuario.role === 'admin' ? 'cliente' : 'admin';
+        if (!confirm(`Alterar ${usuario.nome} para ${novoRole === 'admin' ? 'Administrador' : 'Cliente'}?`)) return;
+        try {
+          const { error } = await supabase
+            .from('perfis')
+            .update({ role: novoRole })
+            .eq('id', usuario.id);
+          if (error) throw error;
+          setUsuarios(prev => prev.map(u => u.id === usuario.id ? { ...u, role: novoRole } : u));
+        } catch (err) {
+          alert(`Erro: ${err.message}`);
+        }
+      };
+
+      const handleDesativarUsuario = async (usuario) => {
+        if (!confirm(`Desativar o usuário ${usuario.nome}? Ele não conseguirá mais acessar o sistema.`)) return;
+        try {
+          const { error } = await supabase
+            .from('perfis')
+            .update({ ativo: false })
+            .eq('id', usuario.id);
+          if (error) throw error;
+          setUsuarios(prev => prev.filter(u => u.id !== usuario.id));
+        } catch (err) {
+          alert(`Erro: ${err.message}`);
+        }
+      };
+
+      const handleSaveOrcamento = async (localId) => {
+        const valor = parseFloat(novoOrcamento.replace(',', '.'));
+        if (isNaN(valor) || valor <= 0) { alert('Informe um valor válido'); return; }
+        setSavingOrcamento(true);
+        try {
+          const { error } = await supabase
+            .from('locais')
+            .update({ orcamento_mensal: valor })
+            .eq('id', localId);
+          if (error) throw error;
+          setLocais(prev => prev.map(l => l.id === localId ? { ...l, orcamento_mensal: valor } : l));
+          setEditingOrcamento(null);
+          setNovoOrcamento('');
+        } catch (err) {
+          alert(`Erro: ${err.message}`);
+        } finally {
+          setSavingOrcamento(false);
+        }
+      };
+
+      const handleCriarLocal = async (e) => {
+        e.preventDefault();
+        if (!novoLocal.nome || !novoLocal.codigo_contrato) { alert('Preencha nome e código do contrato'); return; }
+        setSavingLocal(true);
+        try {
+          const { data, error } = await supabase
+            .from('locais')
+            .insert([{ ...novoLocal, orcamento_mensal: parseFloat(novoLocal.orcamento_mensal) || 0, ativo: true }])
+            .select()
+            .single();
+          if (error) throw error;
+          setLocais(prev => [...prev, data]);
+          setNovoLocal({ nome: '', codigo_contrato: '', centro_custo: '', orcamento_mensal: '' });
+          setShowNovoLocal(false);
+          alert('Local criado com sucesso!');
+        } catch (err) {
+          alert(`Erro: ${err.message}`);
+        } finally {
+          setSavingLocal(false);
+        }
+      };
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
+              <p className="text-gray-600">Carregando configurações...</p>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-6 max-w-6xl mx-auto">
+          <h2 className="text-3xl font-bold text-gray-800 mb-6">Configurações</h2>
+
+          {/* Users Section */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+            <h3 className="text-xl font-semibold text-gray-800 mb-4">Usuários</h3>
+            <div className="space-y-3">
+              {usuarios.map(usuario => (
+                <div key={usuario.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div>
+                    <p className="font-medium text-gray-900">{usuario.nome}</p>
+                    <p className="text-sm text-gray-600">{usuario.email}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-sm font-medium px-3 py-1 rounded border ${
+                      usuario.role === 'admin'
+                        ? 'bg-blue-50 text-blue-800 border-blue-200'
+                        : 'bg-gray-50 text-gray-700 border-gray-300'
+                    }`}>
+                      {usuario.role === 'admin' ? 'Administrador' : 'Cliente'}
+                    </span>
+                    <button
+                      onClick={() => handleToggleRole(usuario)}
+                      className="text-sm px-3 py-1 rounded border border-blue-300 text-blue-700 hover:bg-blue-50 transition"
+                      title="Alternar entre Admin e Cliente"
+                    >
+                      Alterar Role
+                    </button>
+                    <button
+                      onClick={() => handleDesativarUsuario(usuario)}
+                      className="text-sm px-3 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 transition"
+                      title="Desativar usuário"
+                    >
+                      Desativar
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {usuarios.length === 0 && (
+                <p className="text-gray-500 text-sm">Nenhum usuário ativo encontrado.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Locais Section */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-gray-800">Locais</h3>
+              <button
+                onClick={() => setShowNovoLocal(!showNovoLocal)}
+                className="flex items-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition text-sm font-medium"
+              >
+                <lucide.icons.Plus size={16} />
+                Novo Local
+              </button>
+            </div>
+
+            {/* Formulário Novo Local */}
+            {showNovoLocal && (
+              <form onSubmit={handleCriarLocal} className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <h4 className="font-semibold text-blue-900 mb-3">Adicionar Novo Local</h4>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                    <input
+                      type="text"
+                      value={novoLocal.nome}
+                      onChange={e => setNovoLocal(prev => ({ ...prev, nome: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="Ex: Bridgestone em Camaçari"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Código do Contrato *</label>
+                    <input
+                      type="text"
+                      value={novoLocal.codigo_contrato}
+                      onChange={e => setNovoLocal(prev => ({ ...prev, codigo_contrato: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="Ex: FM2C"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Centro de Custo</label>
+                    <input
+                      type="text"
+                      value={novoLocal.centro_custo}
+                      onChange={e => setNovoLocal(prev => ({ ...prev, centro_custo: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="Ex: CC-001"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Orçamento Mensal (R$)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={novoLocal.orcamento_mensal}
+                      onChange={e => setNovoLocal(prev => ({ ...prev, orcamento_mensal: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="Ex: 20000"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={savingLocal}
+                    className="bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 disabled:bg-gray-400 transition text-sm font-medium"
+                  >
+                    {savingLocal ? 'Salvando...' : 'Criar Local'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowNovoLocal(false); setNovoLocal({ nome: '', codigo_contrato: '', centro_custo: '', orcamento_mensal: '' }); }}
+                    className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition text-sm font-medium"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="space-y-3">
+              {locais.map(local => (
+                <div key={local.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-medium text-gray-900">{local.nome}</p>
+                      <p className="text-sm text-gray-600">Código: {local.codigo_contrato}</p>
+                      <p className="text-sm text-gray-600">CC: {local.centro_custo}</p>
+                    </div>
+                    <div className="text-right">
+                      {editingOrcamento === local.id ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600">R$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={novoOrcamento}
+                            onChange={e => setNovoOrcamento(e.target.value)}
+                            className="w-32 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="0.00"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleSaveOrcamento(local.id)}
+                            disabled={savingOrcamento}
+                            className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition disabled:bg-gray-400"
+                          >
+                            {savingOrcamento ? '...' : 'Salvar'}
+                          </button>
+                          <button
+                            onClick={() => { setEditingOrcamento(null); setNovoOrcamento(''); }}
+                            className="bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm hover:bg-gray-400 transition"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div>
+                            <p className="text-sm text-gray-600">Orçamento mensal</p>
+                            <p className="font-semibold text-gray-900">{formatCurrency(local.orcamento_mensal)}</p>
+                          </div>
+                          <button
+                            onClick={() => { setEditingOrcamento(local.id); setNovoOrcamento(local.orcamento_mensal || ''); }}
+                            className="text-sm px-3 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100 transition"
+                            title="Editar orçamento"
+                          >
+                            ✏️ Editar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {locais.length === 0 && (
+                <p className="text-gray-500 text-sm">Nenhum local encontrado.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Main App Component
+    function App() {
+      const [user, setUser] = useState(null);
+      const [userRole, setUserRole] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [currentPage, setCurrentPage] = useState('nova-requisicao');
+
+      useEffect(() => {
+        checkAuth();
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+          if (session?.user) {
+            setUser(session.user);
+            fetchUserRole(session.user.email);
+          } else {
+            setUser(null);
+            setUserRole(null);
+          }
+        });
+
+        return () => {
+          authListener?.subscription?.unsubscribe();
+        };
+      }, []);
+
+      const checkAuth = async () => {
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (authUser) {
+            setUser(authUser);
+            fetchUserRole(authUser.email);
+          }
+        } catch (err) {
+          console.error('Error checking auth:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const fetchUserRole = async (email) => {
+        try {
+          const { data } = await supabase
+            .from('perfis')
+            .select('role')
+            .eq('email', email)
+            .single();
+
+          if (data) setUserRole(data.role);
+        } catch (err) {
+          console.error('Error fetching user role:', err);
+        }
+      };
+
+      const handleLogout = async () => {
+        try {
+          await supabase.auth.signOut();
+          setUser(null);
+          setUserRole(null);
+          setCurrentPage('nova-requisicao');
+        } catch (err) {
+          console.error('Error logging out:', err);
+        }
+      };
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center h-screen bg-gradient-to-br from-blue-50 to-blue-100">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
+              <p className="text-gray-600">Carregando sistema...</p>
+            </div>
+          </div>
+        );
+      }
+
+      if (!user) {
+        return <LoginPage onLogin={setUser} />;
+      }
+
+      return (
+        <div className="flex h-screen bg-gray-100">
+          <Sidebar
+            user={user}
+            userRole={userRole}
+            onLogout={handleLogout}
+            currentPage={currentPage}
+            onPageChange={setCurrentPage}
+          />
+
+          <main className="flex-1 overflow-y-auto">
+            {currentPage === 'nova-requisicao' && (
+              <NovaRequisicao user={user} userRole={userRole} />
+            )}
+            {currentPage === 'meus-pedidos' && (
+              <MeusPedidos user={user} userRole={userRole} />
+            )}
+            {currentPage === 'estoque' && userRole === 'admin' && (
+              <Estoque />
+            )}
+            {currentPage === 'configuracoes' && userRole === 'admin' && (
+              <Configuracoes />
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    // Render app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
