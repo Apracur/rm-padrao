@@ -303,6 +303,7 @@
       const [searchTerm, setSearchTerm] = useState('');
       const [filterBrand, setFilterBrand] = useState('');
       const [loading, setLoading] = useState(true);
+      const [loadError, setLoadError] = useState('');
       const [mesReferencia, setMesReferencia] = useState('');
       const [observacoes, setObservacoes] = useState('');
       const [showSuccess, setShowSuccess] = useState(false);
@@ -315,62 +316,123 @@
       const CLIENTE = 'FM2C';
       const LOCAL = 'Bridgestone em Camaçari';
 
-      useEffect(() => {
-        if (user) {
-          getUserLocalId();
-        }
-      }, [user]);
-
-      const getUserLocalId = async () => {
-        try {
-          const { data } = await supabase
-            .from('perfis')
-            .select('local_id')
-            .eq('email', user.email)
-            .single();
-
-          if (data) setUserLocalId(data.local_id);
-        } catch (err) {
-          console.error('Error getting user local_id:', err);
-        }
+      // Wraps a promise with a timeout so a hanging query never freezes the UI
+      const withTimeout = (promise, ms = 10000, label = 'query') => {
+        return Promise.race([
+          promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout: ${label} demorou mais de ${ms/1000}s`)), ms)
+          )
+        ]);
       };
 
       useEffect(() => {
-        if (userLocalId) {
-          fetchProdutosAndEstoque();
+        if (user) {
+          loadData();
         }
-      }, [userLocalId]);
+      }, [user]);
 
-      const fetchProdutosAndEstoque = async () => {
+      const loadData = async () => {
+        setLoading(true);
+        setLoadError('');
         try {
-          setLoading(true);
+          // Fetch products and user profile IN PARALLEL, each with a timeout
+          const [prodResult, perfilResult] = await Promise.allSettled([
+            withTimeout(
+              supabase.from('produtos').select('*').eq('ativo', true),
+              10000, 'produtos'
+            ),
+            withTimeout(
+              supabase.from('perfis').select('local_id').eq('email', user.email).single(),
+              10000, 'perfis'
+            )
+          ]);
 
-          const { data: prodData, error: prodError } = await supabase
-            .from('produtos')
-            .select('*')
-            .eq('ativo', true);
+          // Handle products result
+          if (prodResult.status === 'fulfilled') {
+            const { data, error } = prodResult.value;
+            if (error) {
+              console.error('Erro ao buscar produtos:', error);
+              setLoadError('Erro ao carregar produtos: ' + error.message);
+              return;
+            }
+            setProdutos(data || []);
+          } else {
+            console.error('Timeout/erro em produtos:', prodResult.reason);
+            setLoadError('Não foi possível carregar os produtos. Verifique sua conexão e tente novamente.');
+            return;
+          }
 
-          if (prodError) throw prodError;
-          setProdutos(prodData || []);
+          // Handle perfis result (non-blocking — page loads even without local_id)
+          let localId = null;
+          if (perfilResult.status === 'fulfilled') {
+            const { data, error } = perfilResult.value;
+            if (!error && data) {
+              localId = data.local_id;
+              setUserLocalId(localId);
+            } else {
+              console.warn('Perfil sem local_id ou erro:', error);
+            }
+          } else {
+            console.warn('Timeout ao buscar perfil:', perfilResult.reason);
+          }
 
-          const { data: estData, error: estError } = await supabase
-            .from('estoque')
-            .select('produto_id, quantidade')
-            .eq('local_id', userLocalId);
-
-          if (estError) throw estError;
-
-          const estoqueMap = {};
-          (estData || []).forEach(item => {
-            estoqueMap[item.produto_id] = item.quantidade;
-          });
-          setEstoque(estoqueMap);
+          // Fetch estoque if we have a localId
+          if (localId) {
+            try {
+              const { data: estData, error: estError } = await withTimeout(
+                supabase.from('estoque').select('produto_id, quantidade').eq('local_id', localId),
+                8000, 'estoque'
+              );
+              if (!estError && estData) {
+                const estoqueMap = {};
+                estData.forEach(item => {
+                  estoqueMap[item.produto_id] = item.quantidade;
+                });
+                setEstoque(estoqueMap);
+              }
+            } catch (estErr) {
+              console.warn('Não foi possível carregar estoque:', estErr);
+              // Non-fatal — continue without estoque data
+            }
+          }
         } catch (err) {
-          console.error('Error fetching data:', err);
+          console.error('Erro inesperado:', err);
+          setLoadError('Erro inesperado: ' + err.message);
         } finally {
           setLoading(false);
         }
       };
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
+              <p className="text-gray-600">Carregando produtos...</p>
+            </div>
+          </div>
+        );
+      }
+
+      if (loadError) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-center max-w-md">
+              <div className="text-5xl mb-4">⚠️</div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">Erro ao carregar</h3>
+              <p className="text-gray-600 mb-6 text-sm">{loadError}</p>
+              <button
+                onClick={loadData}
+                className="bg-blue-800 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-900 transition"
+              >
+                🔄 Tentar novamente
+              </button>
+            </div>
+          </div>
+        );
+      }
+
 
       const handleQuantityChange = (produtoId, value) => {
         const qty = parseInt(value) || 0;
@@ -494,6 +556,22 @@
 
       return (
         <div className="p-6 max-w-7xl mx-auto">
+
+          {!userLocalId && (
+            <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-6 rounded">
+              <div className="flex gap-3">
+                <span className="text-2xl">⚠️</span>
+                <div>
+                  <p className="font-medium text-amber-800">Local não vinculado</p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    Seu perfil não possui um <strong>local_id</strong> configurado. As informações de estoque não serão exibidas.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+
           {showSuccess && (
             <div className="fixed top-4 right-4 bg-green-50 border border-green-200 rounded-lg p-4 flex flex-col gap-3 max-w-md shadow-lg">
               <div className="flex items-start gap-3">
@@ -520,6 +598,7 @@
           )}
 
           <h2 className="text-3xl font-bold text-gray-800 mb-6">Nova Requisição</h2>
+
 
           {/* Budget Summary */}
           <div className="grid grid-cols-3 gap-4 mb-6">
