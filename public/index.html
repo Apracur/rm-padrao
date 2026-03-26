@@ -327,10 +327,14 @@
       };
 
       useEffect(() => {
-        if (user) {
+        if (user?.id) {
           loadData();
         }
-      }, [user]);
+        // Use user?.id (not full user object) so this only re-fires when the
+        // user IDENTITY changes, not when Supabase refreshes the token and
+        // recreates the user object reference (TOKEN_REFRESHED events).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [user?.id]);
 
       const loadData = async () => {
         setLoading(true);
@@ -417,15 +421,17 @@
 
       const filteredProdutos = useMemo(() => {
         return produtos.filter(p => {
-          const matchSearch = p.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             p.codigo_fornecedor.includes(searchTerm);
+          const nome = (p.nome || '').toLowerCase();
+          const codigo = (p.codigo_fornecedor || '').toLowerCase();
+          const busca = (searchTerm || '').toLowerCase();
+          const matchSearch = nome.includes(busca) || codigo.includes(busca);
           const matchBrand = !filterBrand || p.marca === filterBrand;
           return matchSearch && matchBrand;
         });
       }, [produtos, searchTerm, filterBrand]);
 
       const uniqueBrands = useMemo(() => {
-        return [...new Set(produtos.map(p => p.marca))].sort();
+        return [...new Set(produtos.map(p => p.marca).filter(Boolean))].sort();
       }, [produtos]);
 
       // ── Early returns (after all hooks) ──
