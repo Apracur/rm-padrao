@@ -222,20 +222,23 @@
 
           <div className="flex-1 overflow-y-auto">
             <nav className="p-4 space-y-2">
-              {menuItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => onPageChange(item.id)}
-                  className={`w-full text-left px-4 py-3 rounded-lg transition duration-200 flex items-center gap-3 ${
-                    currentPage === item.id
-                      ? 'bg-blue-900 font-medium'
-                      : 'hover:bg-blue-700'
-                  }`}
-                >
-                  <lucide.icons[item.icon] size={20} />
-                  <span>{item.label}</span>
-                </button>
-              ))}
+              {menuItems.map((item) => {
+                const ItemIcon = lucide.icons[item.icon];
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onPageChange(item.id)}
+                    className={`w-full text-left px-4 py-3 rounded-lg transition duration-200 flex items-center gap-3 ${
+                      currentPage === item.id
+                        ? 'bg-blue-900 font-medium'
+                        : 'hover:bg-blue-700'
+                    }`}
+                  >
+                    {ItemIcon && <ItemIcon size={20} />}
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
             </nav>
           </div>
 
