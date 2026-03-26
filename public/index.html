@@ -505,7 +505,7 @@
               numero_pedido: `RM-${Date.now()}`,
               local_id: userLocalId,
               usuario_id: authUser.id,
-              mes_referencia: mesReferencia,
+              mes_referencia: mesReferencia ? `${mesReferencia}-01` : null,
               valor_total: totalValue,
               orcamento: ORCAMENTO,
               status: 'pendente',
