@@ -421,9 +421,9 @@
 
       const filteredProdutos = useMemo(() => {
         return produtos.filter(p => {
-          const nome = (p.nome || '').toLowerCase();
-          const codigo = (p.codigo_fornecedor || '').toLowerCase();
-          const busca = (searchTerm || '').toLowerCase();
+          const nome = String(p.nome || '').toLowerCase();
+          const codigo = String(p.codigo_fornecedor || '').toLowerCase();
+          const busca = String(searchTerm || '').toLowerCase();
           const matchSearch = nome.includes(busca) || codigo.includes(busca);
           const matchBrand = !filterBrand || p.marca === filterBrand;
           return matchSearch && matchBrand;
