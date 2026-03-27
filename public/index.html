@@ -1069,206 +1069,399 @@
     // Estoque Component (Admin Only)
     function Estoque() {
       const [produtos, setProdutos] = useState([]);
+      const [locais, setLocais] = useState([]);
       const [estoque, setEstoque] = useState([]);
       const [loading, setLoading] = useState(true);
-      const [changes, setChanges] = useState({});
+      const [loadError, setLoadError] = useState('');
+      const [changes, setChanges] = useState({});   // key = produto_id
       const [saving, setSaving] = useState(false);
       const [uploadingFile, setUploadingFile] = useState(false);
+      const [successMsg, setSuccessMsg] = useState('');
+      const [errorMsg, setErrorMsg] = useState('');
+      const [searchEstoque, setSearchEstoque] = useState('');
+      const [filterLocal, setFilterLocal] = useState('');
+      const [importPreview, setImportPreview] = useState(null); // {updates, skipped}
       const fileInputRef = useRef();
 
-      useEffect(() => {
-        fetchData();
-      }, []);
+      useEffect(() => { fetchData(); }, []);
 
       const fetchData = async () => {
         try {
           setLoading(true);
+          setLoadError('');
 
-          const { data: prodData } = await supabase
-            .from('produtos')
-            .select('*')
-            .eq('ativo', true)
-            .order('nome');
+          const [prodRes, locaisRes, estRes] = await Promise.all([
+            supabase.from('produtos').select('*').eq('ativo', true).order('nome'),
+            supabase.from('locais').select('id, nome').eq('ativo', true),
+            supabase.from('estoque').select('*'),
+          ]);
 
-          const { data: estData } = await supabase
-            .from('estoque')
-            .select('*');
+          if (prodRes.error) throw prodRes.error;
+          if (locaisRes.error) throw locaisRes.error;
+          if (estRes.error) throw estRes.error;
 
-          setProdutos(prodData || []);
-          setEstoque(estData || []);
+          setProdutos(prodRes.data || []);
+          setLocais(locaisRes.data || []);
+          setEstoque(estRes.data || []);
         } catch (err) {
-          console.error('Error fetching data:', err);
+          console.error('fetchData error:', err);
+          setLoadError('Erro ao carregar dados: ' + err.message);
         } finally {
           setLoading(false);
         }
       };
 
-      const getEstoqueForProduct = (produtoId) => {
-        return estoque.find(e => e.produto_id === produtoId);
+      const showSuccess = (msg) => {
+        setSuccessMsg(msg);
+        setTimeout(() => setSuccessMsg(''), 6000);
+      };
+      const showError = (msg) => {
+        setErrorMsg(msg);
+        setTimeout(() => setErrorMsg(''), 8000);
       };
 
-      const handleQuantityChange = (estoqueId, produtoId, localId, newQty) => {
+      // Returns estoque row for a (produto, local) pair
+      const getEstoqueItem = (produtoId, localId) =>
+        estoque.find(e => e.produto_id === produtoId && (localId ? e.local_id === localId : true));
+
+      // ------------------------------------------------------------------
+      // FILTERING
+      // ------------------------------------------------------------------
+      const filteredProdutos = useMemo(() => {
+        let list = produtos;
+        if (searchEstoque.trim()) {
+          const term = searchEstoque.toLowerCase();
+          list = list.filter(p =>
+            String(p.nome || '').toLowerCase().includes(term) ||
+            String(p.codigo_fornecedor || '').toLowerCase().includes(term) ||
+            String(p.marca || '').toLowerCase().includes(term)
+          );
+        }
+        return list;
+      }, [produtos, searchEstoque]);
+
+      // Locais to display columns: use filter or all
+      const visibleLocais = useMemo(() => {
+        if (filterLocal) return locais.filter(l => l.id === filterLocal);
+        return locais;
+      }, [locais, filterLocal]);
+
+      // ------------------------------------------------------------------
+      // MANUAL EDITING
+      // key for changes map: `{produtoId}___{localId}`
+      // ------------------------------------------------------------------
+      const changeKey = (produtoId, localId) => `${produtoId}___${localId}`;
+
+      const getCurrentQty = (produtoId, localId) => {
+        const key = changeKey(produtoId, localId);
+        if (changes[key] !== undefined) return changes[key].novaQuantidade;
+        const item = getEstoqueItem(produtoId, localId);
+        return item?.quantidade ?? 0;
+      };
+
+      const handleQtyChange = (produto, local, newQtyRaw) => {
+        const novaQuantidade = Math.max(0, parseInt(newQtyRaw) || 0);
+        const key = changeKey(produto.id, local.id);
+        const estoqueItem = getEstoqueItem(produto.id, local.id);
+        const quantidadeAnterior = estoqueItem?.quantidade ?? 0;
+
         setChanges(prev => ({
           ...prev,
-          [estoqueId]: {
-            estoqueId,
-            produtoId,
-            localId,
-            novaQuantidade: parseInt(newQty) || 0,
-            quantidadeAnterior: estoque.find(e => e.id === estoqueId)?.quantidade || 0
+          [key]: {
+            produtoId: produto.id,
+            localId: local.id,
+            estoqueId: estoqueItem?.id || null,   // null means we need to INSERT
+            novaQuantidade,
+            quantidadeAnterior,
+            produto,
+            local,
           }
         }));
-
-        setEstoque(prev => prev.map(e =>
-          e.id === estoqueId ? { ...e, quantidade: parseInt(newQty) || 0 } : e
-        ));
       };
 
+      const handleStep = (produto, local, delta) => {
+        const current = getCurrentQty(produto.id, local.id);
+        handleQtyChange(produto, local, current + delta);
+      };
+
+      // ------------------------------------------------------------------
+      // SAVE ALL CHANGES (upsert)
+      // ------------------------------------------------------------------
       const handleSaveChanges = async () => {
-        if (Object.keys(changes).length === 0) {
-          alert('Nenhuma alteração foi feita');
-          return;
-        }
+        if (Object.keys(changes).length === 0) return;
 
         setSaving(true);
         try {
           const { data: { user: authUser } } = await supabase.auth.getUser();
+          const changeList = Object.values(changes);
 
-          for (const change of Object.values(changes)) {
-            const { error: updateError } = await supabase
+          // Separate inserts (no existing row) from updates
+          const toUpdate = changeList.filter(c => c.estoqueId);
+          const toInsert = changeList.filter(c => !c.estoqueId);
+
+          // 1. UPDATEs
+          for (const c of toUpdate) {
+            const { error } = await supabase
               .from('estoque')
-              .update({ quantidade: change.novaQuantidade })
-              .eq('id', change.estoqueId);
+              .update({ quantidade: c.novaQuantidade })
+              .eq('id', c.estoqueId);
+            if (error) throw error;
 
-            if (updateError) throw updateError;
+            await supabase.from('estoque_movimentacoes').insert([{
+              estoque_id: c.estoqueId,
+              tipo: 'ajuste',
+              quantidade: c.novaQuantidade - c.quantidadeAnterior,
+              quantidade_anterior: c.quantidadeAnterior,
+              quantidade_nova: c.novaQuantidade,
+              observacao: 'Ajuste manual de estoque',
+              usuario_id: authUser.id,
+            }]);
+          }
 
-            const { error: movError } = await supabase
-              .from('estoque_movimentacoes')
+          // 2. INSERTs (product-local pair had no row yet)
+          for (const c of toInsert) {
+            const { data: inserted, error } = await supabase
+              .from('estoque')
               .insert([{
-                estoque_id: change.estoqueId,
-                tipo: 'ajuste',
-                quantidade: change.novaQuantidade - change.quantidadeAnterior,
-                quantidade_anterior: change.quantidadeAnterior,
-                quantidade_nova: change.novaQuantidade,
-                observacao: 'Ajuste manual de estoque',
-                usuario_id: authUser.id
-              }]);
+                produto_id: c.produtoId,
+                local_id: c.localId,
+                quantidade: c.novaQuantidade,
+                quantidade_minima: 0,
+              }])
+              .select()
+              .single();
+            if (error) throw error;
 
-            if (movError) throw movError;
+            if (inserted) {
+              await supabase.from('estoque_movimentacoes').insert([{
+                estoque_id: inserted.id,
+                tipo: 'ajuste',
+                quantidade: c.novaQuantidade,
+                quantidade_anterior: 0,
+                quantidade_nova: c.novaQuantidade,
+                observacao: 'Registro inicial de estoque',
+                usuario_id: authUser.id,
+              }]);
+            }
           }
 
           setChanges({});
-          fetchData();
-          alert('Alterações salvas com sucesso!');
+          await fetchData();
+          showSuccess(`${changeList.length} item(ns) salvo(s) com sucesso!`);
         } catch (err) {
-          console.error('Error saving changes:', err);
-          alert(`Erro ao salvar: ${err.message}`);
+          console.error('Save error:', err);
+          showError('Erro ao salvar: ' + err.message);
         } finally {
           setSaving(false);
         }
       };
 
+      // ------------------------------------------------------------------
+      // EXCEL IMPORT — parse + preview
+      // Supported column names (case-insensitive):
+      //   código / codigo / codigo_fornecedor / Código
+      //   quantidade / estoque / qty / saldo
+      //   local / local_id / localid / nome_local
+      // ------------------------------------------------------------------
       const handleFileUpload = async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
+        if (fileInputRef.current) fileInputRef.current.value = '';
 
         setUploadingFile(true);
         try {
-          const reader = new FileReader();
-          reader.onload = async (e) => {
-            try {
-              const data = new Uint8Array(e.target.result);
-              const workbook = XLSX.read(data, { type: 'array' });
-              const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-              const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = reject;
+            reader.onload = async (e) => {
+              try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
-              const updates = [];
-              for (const row of jsonData) {
-                const codigo = row['Código'] || row['codigo_fornecedor'];
-                const quantidade = parseInt(row['Quantidade'] || row['Estoque']) || 0;
-
-                const produto = produtos.find(p => p.codigo_fornecedor === codigo);
-                if (!produto) {
-                  console.warn(`Produto com código ${codigo} não encontrado`);
-                  continue;
+                if (!jsonData.length) {
+                  showError('A planilha está vazia.');
+                  resolve(); return;
                 }
 
-                const estoqueItem = estoque.find(e => e.produto_id === produto.id);
-                if (estoqueItem) {
-                  updates.push({
-                    estoqueId: estoqueItem.id,
-                    produtoId: produto.id,
-                    localId: estoqueItem.local_id,
-                    novaQuantidade: quantidade,
-                    quantidadeAnterior: estoqueItem.quantidade
-                  });
+                // Helper: find column name case-insensitively
+                const findCol = (row, candidates) => {
+                  const keys = Object.keys(row);
+                  for (const cand of candidates) {
+                    const found = keys.find(k => k.toString().toLowerCase().trim() === cand.toLowerCase());
+                    if (found !== undefined) return row[found];
+                  }
+                  return undefined;
+                };
+
+                const updates = [];
+                const skipped = [];
+
+                for (const row of jsonData) {
+                  const codigo = String(findCol(row, ['código', 'codigo', 'codigo_fornecedor', 'code', 'cod']) || '').trim();
+                  const qtyRaw = findCol(row, ['quantidade', 'estoque', 'qty', 'saldo', 'quantity']);
+                  const localRaw = String(findCol(row, ['local', 'local_id', 'localid', 'nome_local', 'location']) || '').trim();
+
+                  if (!codigo) { skipped.push({ row, motivo: 'Código vazio' }); continue; }
+
+                  const quantidade = parseInt(qtyRaw) || 0;
+
+                  const produto = produtos.find(p =>
+                    (p.codigo_fornecedor || '').toLowerCase() === codigo.toLowerCase()
+                  );
+                  if (!produto) {
+                    skipped.push({ row, codigo, motivo: `Código "${codigo}" não encontrado` });
+                    continue;
+                  }
+
+                  // Determine target local(is)
+                  let targetLocais = locais;
+                  if (localRaw) {
+                    const matched = locais.filter(l =>
+                      l.nome.toLowerCase().includes(localRaw.toLowerCase()) ||
+                      l.id === localRaw
+                    );
+                    if (matched.length) {
+                      targetLocais = matched;
+                    } else {
+                      skipped.push({ row, codigo, motivo: `Local "${localRaw}" não encontrado` });
+                      continue;
+                    }
+                  }
+
+                  for (const local of targetLocais) {
+                    const estoqueItem = getEstoqueItem(produto.id, local.id);
+                    updates.push({
+                      produtoId: produto.id,
+                      localId: local.id,
+                      localNome: local.nome,
+                      estoqueId: estoqueItem?.id || null,
+                      novaQuantidade: quantidade,
+                      quantidadeAnterior: estoqueItem?.quantidade ?? 0,
+                      produto,
+                    });
+                  }
                 }
-              }
 
-              if (updates.length === 0) {
-                alert('Nenhum produto foi encontrado para importação');
-                return;
-              }
-
-              const confirmMsg = `Deseja importar ${updates.length} produtos?\n\nEsta ação atualizará as quantidades de estoque.`;
-              if (confirm(confirmMsg)) {
-                const { data: { user: authUser } } = await supabase.auth.getUser();
-
-                for (const update of updates) {
-                  await supabase
-                    .from('estoque')
-                    .update({ quantidade: update.novaQuantidade })
-                    .eq('id', update.estoqueId);
-
-                  await supabase
-                    .from('estoque_movimentacoes')
-                    .insert([{
-                      estoque_id: update.estoqueId,
-                      tipo: 'importacao',
-                      quantidade: update.novaQuantidade - update.quantidadeAnterior,
-                      quantidade_anterior: update.quantidadeAnterior,
-                      quantidade_nova: update.novaQuantidade,
-                      observacao: 'Importação de planilha Excel',
-                      usuario_id: authUser.id
-                    }]);
+                if (!updates.length) {
+                  showError('Nenhum produto foi identificado na planilha. Verifique os cabeçalhos (Código, Quantidade).');
+                  resolve(); return;
                 }
 
-                fetchData();
-                alert('Importação realizada com sucesso!');
+                setImportPreview({ updates, skipped });
+                resolve();
+              } catch (err) {
+                console.error('Excel parse error:', err);
+                showError('Erro ao ler o arquivo: ' + err.message);
+                reject(err);
               }
-            } catch (err) {
-              console.error('Error processing file:', err);
-              alert(`Erro ao processar arquivo: ${err.message}`);
-            }
-          };
-          reader.readAsArrayBuffer(file);
+            };
+            reader.readAsArrayBuffer(file);
+          });
+        } catch (_) {
+          // handled inside
         } finally {
           setUploadingFile(false);
-          if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-          }
         }
       };
 
-      const handleExport = () => {
-        const data = estoque.map(e => {
-          const produto = produtos.find(p => p.id === e.produto_id);
-          return {
-            'Código': produto?.codigo_fornecedor,
-            'Descrição': produto?.nome,
-            'Marca': produto?.marca,
-            'Unidade': produto?.unidade,
-            'Estoque': e.quantidade,
-            'Quantidade Mínima': e.quantidade_minima,
-            'Última Atualização': formatDate(e.updated_at)
-          };
-        });
+      // Actually apply the confirmed import
+      const handleConfirmImport = async () => {
+        if (!importPreview) return;
+        const { updates } = importPreview;
 
-        const worksheet = XLSX.utils.json_to_sheet(data);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Estoque');
-        XLSX.writeFile(workbook, `estoque-${new Date().toISOString().split('T')[0]}.xlsx`);
+        setSaving(true);
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+
+          for (const upd of updates) {
+            if (upd.estoqueId) {
+              // Update existing row
+              const { error } = await supabase
+                .from('estoque')
+                .update({ quantidade: upd.novaQuantidade })
+                .eq('id', upd.estoqueId);
+              if (error) throw error;
+
+              await supabase.from('estoque_movimentacoes').insert([{
+                estoque_id: upd.estoqueId,
+                tipo: 'importacao',
+                quantidade: upd.novaQuantidade - upd.quantidadeAnterior,
+                quantidade_anterior: upd.quantidadeAnterior,
+                quantidade_nova: upd.novaQuantidade,
+                observacao: 'Importação de planilha Excel',
+                usuario_id: authUser.id,
+              }]);
+            } else {
+              // Insert new row
+              const { data: inserted, error } = await supabase
+                .from('estoque')
+                .insert([{
+                  produto_id: upd.produtoId,
+                  local_id: upd.localId,
+                  quantidade: upd.novaQuantidade,
+                  quantidade_minima: 0,
+                }])
+                .select()
+                .single();
+              if (error) throw error;
+
+              if (inserted) {
+                await supabase.from('estoque_movimentacoes').insert([{
+                  estoque_id: inserted.id,
+                  tipo: 'importacao',
+                  quantidade: upd.novaQuantidade,
+                  quantidade_anterior: 0,
+                  quantidade_nova: upd.novaQuantidade,
+                  observacao: 'Importação inicial via planilha Excel',
+                  usuario_id: authUser.id,
+                }]);
+              }
+            }
+          }
+
+          setImportPreview(null);
+          await fetchData();
+          showSuccess(`Importação concluída: ${updates.length} item(ns) atualizado(s)!`);
+        } catch (err) {
+          console.error('Import error:', err);
+          showError('Erro durante importação: ' + err.message);
+        } finally {
+          setSaving(false);
+        }
       };
+
+      // ------------------------------------------------------------------
+      // EXPORT
+      // ------------------------------------------------------------------
+      const handleExport = () => {
+        const rows = [];
+        for (const produto of produtos) {
+          for (const local of locais) {
+            const item = getEstoqueItem(produto.id, local.id);
+            rows.push({
+              'Código': produto.codigo_fornecedor,
+              'Descrição': produto.nome,
+              'Marca': produto.marca,
+              'Unidade': produto.unidade,
+              'Local': local.nome,
+              'Quantidade': item?.quantidade ?? 0,
+              'Quantidade Mínima': item?.quantidade_minima ?? 0,
+              'Última Atualização': item ? formatDate(item.updated_at) : '',
+            });
+          }
+        }
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Estoque');
+        XLSX.writeFile(wb, `estoque-${new Date().toISOString().split('T')[0]}.xlsx`);
+      };
+
+      // ------------------------------------------------------------------
+      // RENDER HELPERS
+      // ------------------------------------------------------------------
+      const pendingCount = Object.keys(changes).length;
 
       if (loading) {
         return (
@@ -1281,121 +1474,274 @@
         );
       }
 
+      if (loadError) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-center max-w-md">
+              <div className="text-5xl mb-4">⚠️</div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">Erro ao carregar</h3>
+              <p className="text-gray-600 mb-6 text-sm">{loadError}</p>
+              <button onClick={fetchData} className="bg-blue-800 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-900 transition">
+                🔄 Tentar novamente
+              </button>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="p-6 max-w-7xl mx-auto">
+
+          {/* Toasts */}
+          {successMsg && (
+            <div className="fixed top-4 right-4 bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3 max-w-sm shadow-lg z-50">
+              <span className="text-green-600 text-xl mt-0.5">✓</span>
+              <p className="font-medium text-green-800 text-sm">{successMsg}</p>
+            </div>
+          )}
+          {errorMsg && (
+            <div className="fixed top-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-sm shadow-lg z-50">
+              <span className="text-red-600 text-xl mt-0.5">✗</span>
+              <p className="font-medium text-red-800 text-sm">{errorMsg}</p>
+            </div>
+          )}
+
+          {/* Import Preview Modal */}
+          {importPreview && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-xl font-bold text-gray-800">Confirmar Importação</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {importPreview.updates.length} item(ns) serão atualizados
+                    {importPreview.skipped.length > 0 && ` • ${importPreview.skipped.length} linha(s) ignorada(s)`}
+                  </p>
+                </div>
+                <div className="overflow-y-auto flex-1 p-6">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Produto</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Local</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-700">Atual</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-700">Novo</th>
+                        <th className="px-3 py-2 text-center font-semibold text-gray-700">Δ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {importPreview.updates.map((upd, i) => {
+                        const delta = upd.novaQuantidade - upd.quantidadeAnterior;
+                        return (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-3 py-2">
+                              <p className="font-medium text-gray-900">{upd.produto.nome}</p>
+                              <p className="text-xs text-gray-500">{upd.produto.codigo_fornecedor}</p>
+                            </td>
+                            <td className="px-3 py-2 text-gray-600 text-xs">{upd.localNome}</td>
+                            <td className="px-3 py-2 text-center text-gray-600">{upd.quantidadeAnterior}</td>
+                            <td className="px-3 py-2 text-center font-bold text-gray-900">{upd.novaQuantidade}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`font-semibold ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                                {delta > 0 ? '+' : ''}{delta}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {importPreview.skipped.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-sm font-semibold text-amber-700 mb-2">⚠️ Linhas ignoradas:</p>
+                      {importPreview.skipped.map((s, i) => (
+                        <p key={i} className="text-xs text-amber-600 bg-amber-50 px-3 py-1 rounded mb-1">
+                          {s.codigo ? `Código: ${s.codigo} — ` : ''}{s.motivo}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="p-6 border-t border-gray-200 flex gap-3 justify-end">
+                  <button
+                    onClick={() => setImportPreview(null)}
+                    className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleConfirmImport}
+                    disabled={saving}
+                    className="px-5 py-2 rounded-lg bg-blue-800 text-white font-semibold hover:bg-blue-900 disabled:bg-gray-400 transition flex items-center gap-2"
+                  >
+                    {saving ? (
+                      <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Importando...</>
+                    ) : (
+                      <>✓ Confirmar Importação</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-3xl font-bold text-gray-800">Gestão de Estoque</h2>
             <div className="flex gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadingFile}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition duration-200 flex items-center gap-2"
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition flex items-center gap-2"
               >
-                <LucideUpload size={20} />
-                {uploadingFile ? 'Importando...' : 'Importar Excel'}
+                <LucideUpload size={18} />
+                {uploadingFile ? 'Lendo arquivo...' : 'Importar Excel'}
               </button>
               <button
                 onClick={handleExport}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition duration-200 flex items-center gap-2"
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
               >
-                <LucideDownload size={20} />
+                <LucideDownload size={18} />
                 Exportar Excel
               </button>
             </div>
           </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
 
+          {/* Tip about Excel format */}
+          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-700">
+            <strong>📋 Formato da planilha de importação:</strong> A planilha deve ter colunas <strong>Código</strong> (código do produto) e <strong>Quantidade</strong> (saldo). Opcionalmente, a coluna <strong>Local</strong> define para qual local importar; sem ela, aplica a todos os locais.
+          </div>
+
+          {/* Filters */}
+          <div className="flex gap-4 mb-4">
+            <div className="relative flex-1 max-w-sm">
+              <LucideSearch className="absolute left-3 top-2.5 text-gray-400" size={18} />
+              <input
+                type="text"
+                value={searchEstoque}
+                onChange={(e) => setSearchEstoque(e.target.value)}
+                placeholder="Buscar por código, nome ou marca..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+              />
+            </div>
+            {locais.length > 1 && (
+              <select
+                value={filterLocal}
+                onChange={(e) => setFilterLocal(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+              >
+                <option value="">Todos os locais</option>
+                {locais.map(l => (
+                  <option key={l.id} value={l.id}>{l.nome}</option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* Table */}
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-6 py-3 text-left font-semibold text-gray-700">Código</th>
-                    <th className="px-6 py-3 text-left font-semibold text-gray-700">Descrição</th>
-                    <th className="px-6 py-3 text-left font-semibold text-gray-700">Marca</th>
-                    <th className="px-6 py-3 text-center font-semibold text-gray-700">Unidade</th>
-                    <th className="px-6 py-3 text-center font-semibold text-gray-700">Estoque</th>
-                    <th className="px-6 py-3 text-center font-semibold text-gray-700">Quantidade Mínima</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700 w-32">Código</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">Descrição</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700 w-28">Marca</th>
+                    <th className="px-4 py-3 text-center font-semibold text-gray-700 w-20">Un.</th>
+                    {visibleLocais.map(local => (
+                      <th key={local.id} className="px-4 py-3 text-center font-semibold text-gray-700 min-w-36">
+                        {local.nome}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {produtos.map(produto => {
-                    const estoqueItem = getEstoqueForProduct(produto.id);
-                    const qty = estoqueItem?.quantidade || 0;
-                    const minQty = estoqueItem?.quantidade_minima || 0;
+                  {filteredProdutos.map(produto => (
+                    <tr key={produto.id} className="hover:bg-blue-50 transition">
+                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{produto.codigo_fornecedor}</td>
+                      <td className="px-4 py-3 text-gray-900 font-medium">{produto.nome}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{produto.marca}</td>
+                      <td className="px-4 py-3 text-center text-gray-500 text-xs">{produto.unidade}</td>
+                      {visibleLocais.map(local => {
+                        const estoqueItem = getEstoqueItem(produto.id, local.id);
+                        const key = changeKey(produto.id, local.id);
+                        const qty = getCurrentQty(produto.id, local.id);
+                        const minQty = estoqueItem?.quantidade_minima ?? 0;
+                        const isDirty = changes[key] !== undefined;
 
-                    let qtyColor = 'bg-green-100 text-green-800';
-                    if (qty === 0) {
-                      qtyColor = 'bg-red-100 text-red-800';
-                    } else if (qty < minQty) {
-                      qtyColor = 'bg-amber-100 text-amber-800';
-                    }
+                        let badgeColor = 'bg-green-100 text-green-800';
+                        if (qty === 0) badgeColor = 'bg-red-100 text-red-800';
+                        else if (qty < minQty) badgeColor = 'bg-amber-100 text-amber-800';
 
-                    return (
-                      <tr key={produto.id} className="hover:bg-gray-50 transition">
-                        <td className="px-6 py-4 font-medium text-gray-900">{produto.codigo_fornecedor}</td>
-                        <td className="px-6 py-4 text-gray-700">{produto.nome}</td>
-                        <td className="px-6 py-4 text-gray-600">{produto.marca}</td>
-                        <td className="px-6 py-4 text-center text-gray-600">{produto.unidade}</td>
-                        <td className="px-6 py-4">
-                          <input
-                            type="number"
-                            min="0"
-                            value={qty}
-                            onChange={(e) => {
-                              if (estoqueItem) {
-                                handleQuantityChange(estoqueItem.id, produto.id, estoqueItem.local_id, e.target.value);
-                              }
-                            }}
-                            className={`w-24 px-3 py-2 border rounded text-center focus:ring-2 focus:ring-blue-500 outline-none ${qtyColor}`}
-                          />
-                        </td>
-                        <td className="px-6 py-4 text-center text-gray-600">{minQty}</td>
-                      </tr>
-                    );
-                  })}
+                        return (
+                          <td key={local.id} className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => handleStep(produto, local, -1)}
+                                className="w-7 h-7 rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg leading-none flex items-center justify-center transition"
+                                title="Diminuir 1"
+                              >−</button>
+                              <input
+                                type="number"
+                                min="0"
+                                value={qty}
+                                onChange={(e) => handleQtyChange(produto, local, e.target.value)}
+                                className={`w-16 px-1 py-1 border-2 rounded text-center font-semibold text-sm outline-none focus:ring-2 focus:ring-blue-500 transition ${isDirty ? 'border-blue-400 bg-blue-50' : `border-transparent ${badgeColor}`}`}
+                              />
+                              <button
+                                onClick={() => handleStep(produto, local, 1)}
+                                className="w-7 h-7 rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-gray-600 font-bold text-lg leading-none flex items-center justify-center transition"
+                                title="Aumentar 1"
+                              >+</button>
+                            </div>
+                            {!estoqueItem && !isDirty && (
+                              <p className="text-center text-xs text-gray-400 mt-0.5">sem registro</p>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
+
+            {filteredProdutos.length === 0 && (
+              <div className="text-center py-12">
+                <LucidePackage size={48} className="mx-auto text-gray-300 mb-3" />
+                <p className="text-gray-500">Nenhum produto encontrado</p>
+              </div>
+            )}
           </div>
 
-          {Object.keys(changes).length > 0 && (
-            <div className="mt-6 flex gap-4">
+          {/* Sticky save bar */}
+          {pendingCount > 0 && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-gray-200 shadow-2xl rounded-xl px-6 py-4 flex items-center gap-4 z-40">
+              <div className="text-sm text-gray-700">
+                <span className="font-bold text-blue-800">{pendingCount}</span> alteração(ões) pendente(s)
+              </div>
+              <button
+                onClick={() => { setChanges({}); fetchData(); }}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition text-sm"
+              >
+                Descartar
+              </button>
               <button
                 onClick={handleSaveChanges}
                 disabled={saving}
-                className="bg-blue-800 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-900 disabled:bg-gray-400 transition duration-200 flex items-center gap-2"
+                className="px-5 py-2 rounded-lg bg-blue-800 text-white font-semibold hover:bg-blue-900 disabled:bg-gray-400 transition flex items-center gap-2 text-sm"
               >
                 {saving ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    Salvando...
-                  </>
+                  <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Salvando...</>
                 ) : (
-                  <>
-                    <LucideSave size={20} />
-                    Salvar Alterações ({Object.keys(changes).length})
-                  </>
+                  <><LucideSave size={16} />Salvar Alterações</>
                 )}
-              </button>
-              <button
-                onClick={() => {
-                  setChanges({});
-                  fetchData();
-                }}
-                className="bg-gray-300 text-gray-800 px-6 py-3 rounded-lg font-semibold hover:bg-gray-400 transition duration-200"
-              >
-                Cancelar
               </button>
             </div>
           )}
+
         </div>
       );
     }
