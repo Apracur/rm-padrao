@@ -502,7 +502,7 @@
           const { data: pedido, error: pedidoError } = await supabase
             .from('pedidos')
             .insert([{
-              numero_pedido: `RM-${Date.now()}`,
+              numero_pedido: Math.floor(Date.now() / 1000),
               local_id: userLocalId,
               usuario_id: authUser.id,
               mes_referencia: mesReferencia ? `${mesReferencia}-01` : null,
@@ -534,7 +534,7 @@
 
           if (itensError) throw itensError;
 
-          const numeroPedido = pedido.numero_pedido;
+          const numeroPedido = `RM-${pedido.numero_pedido}`;
           const valorTotal = totalValue;
           setSuccessMessage(`Pedido ${numeroPedido} criado com sucesso!`);
           setLastPedido({ numero: numeroPedido, valor: valorTotal, mes: mesReferencia });
@@ -1026,7 +1026,7 @@
                       {/* WhatsApp Share Button */}
                       <div className="mb-4">
                         <a
-                          href={'https://wa.me/?text=Requisicao%20de%20Material%0A%0APedido:%20' + pedido.numero_pedido + '%0AData:%20' + formatDate(pedido.created_at) + '%0AMes:%20' + getMonthName(pedido.mes_referencia) + '%0AValor:%20' + formatCurrency(pedido.valor_total) + '%0AStatus:%20' + getStatusLabel(pedido.status)}
+                          href={'https://wa.me/?text=Requisicao%20de%20Material%0A%0APedido:%20RM-' + pedido.numero_pedido + '%0AData:%20' + formatDate(pedido.created_at) + '%0AMes:%20' + getMonthName(pedido.mes_referencia) + '%0AValor:%20' + formatCurrency(pedido.valor_total) + '%0AStatus:%20' + getStatusLabel(pedido.status)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
