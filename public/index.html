@@ -245,20 +245,26 @@
         doc.text(`Status: ${statusParaPDF}`, 120, 59);
 
         // Table
-        const tableData = itens.map((item) => [
-          item.produtos?.codigo_fornecedor ||
-            item.codigo ||
-            item.produtos?.codigo ||
-            "N/A",
-          item.produtos?.nome || item.nome || "N/A",
-          item.produtos?.marca || item.marca || "N/A",
-          item.produtos?.unidade || item.unidade || "N/A",
-          item.quantidade,
-          formatCurrency(
-            item.preco_unitario || item.preco_total / item.quantidade,
-          ),
-          formatCurrency(item.preco_total),
-        ]);
+        const tableData = itens.map((item) => {
+          const nomeProduto = item.produtos?.nome || item.nome || "N/A";
+          const codInterno = PRODUCT_INTERNAL_CODES[nomeProduto];
+          const descVal = codInterno ? `${nomeProduto} (Cód Int: ${codInterno})` : nomeProduto;
+
+          return [
+            item.produtos?.codigo_fornecedor ||
+              item.codigo ||
+              item.produtos?.codigo ||
+              "N/A",
+            descVal,
+            item.produtos?.marca || item.marca || "N/A",
+            item.produtos?.unidade || item.unidade || "N/A",
+            item.quantidade,
+            formatCurrency(
+              item.preco_unitario || item.preco_total / item.quantidade,
+            ),
+            formatCurrency(item.preco_total),
+          ];
+        });
 
         doc.autoTable({
           startY: 70,
@@ -1373,7 +1379,7 @@
           try {
             const { data, error } = await supabase
               .from("itens_pedido")
-              .select("*, produtos(nome, codigo_fornecedor)")
+              .select("*, produtos(nome, codigo_fornecedor, marca, unidade)")
               .eq("pedido_id", pedidoId);
 
             if (error) throw error;
