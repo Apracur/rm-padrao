@@ -27,6 +27,10 @@
     <!-- SheetJS for Excel -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 
+    <!-- jsPDF -->
+    <script src="https://unpkg.com/jspdf@latest/dist/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/jspdf-autotable@latest/dist/jspdf.plugin.autotable.min.js"></script>
+
     <!-- Lucide Icons -->
 
     <style>
@@ -202,6 +206,119 @@
         if (!monthStr) return "";
         const [year, month] = monthStr.split("-");
         return `${months[parseInt(month) - 1]}/${year}`;
+      };
+
+      const generateOrderPDF = (pedido, itens) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        // Header
+        doc.setFontSize(22);
+        doc.setTextColor(30, 58, 138); // blue-900
+        doc.text("Ello Atacadão", 105, 20, { align: "center" });
+
+        doc.setFontSize(14);
+        doc.setTextColor(71, 85, 105); // text-slate-600
+        doc.text("Requisição de Material - RM", 105, 30, { align: "center" });
+
+        // Line
+        doc.setDrawColor(226, 232, 240); // bg-slate-200
+        doc.line(20, 35, 190, 35);
+
+        // Order Info
+        doc.setFontSize(11);
+        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "normal");
+
+        const numero = pedido.numero_pedido || pedido.numero;
+        const dataParaPDF = formatDate(pedido.created_at || new Date());
+        const mesParaPDF = getMonthName(pedido.mes_referencia || pedido.mes);
+        const clienteParaPDF = pedido.locais?.nome || pedido.cliente_nome || "N/A";
+        const statusParaPDF = (pedido.status || "pendente").toUpperCase();
+
+        doc.text(`Pedido: RM-${numero}`, 20, 45);
+        doc.text(`Data: ${dataParaPDF}`, 20, 52);
+        doc.text(`Mês Ref: ${mesParaPDF}`, 20, 59);
+
+        doc.text(`Cliente: ${clienteParaPDF}`, 120, 45);
+        doc.text(`Centro de Custo: ${pedido.centro_custo || "N/A"}`, 120, 52);
+        doc.text(`Status: ${statusParaPDF}`, 120, 59);
+
+        // Table
+        const tableData = itens.map((item) => [
+          item.produtos?.codigo_fornecedor ||
+            item.codigo ||
+            item.produtos?.codigo ||
+            "N/A",
+          item.produtos?.nome || item.nome || "N/A",
+          item.produtos?.marca || item.marca || "N/A",
+          item.produtos?.unidade || item.unidade || "N/A",
+          item.quantidade,
+          formatCurrency(
+            item.preco_unitario || item.preco_total / item.quantidade,
+          ),
+          formatCurrency(item.preco_total),
+        ]);
+
+        doc.autoTable({
+          startY: 70,
+          head: [
+            ["Cód.", "Descrição", "Marca", "Unid.", "Qtd.", "P. Unit", "Subtotal"],
+          ],
+          body: tableData,
+          theme: "striped",
+          headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+          columnStyles: {
+            4: { halign: "center" },
+            5: { halign: "right" },
+            6: { halign: "right" },
+          },
+        });
+
+        // Total
+        const finalY = doc.lastAutoTable.finalY + 10;
+        const valorTotal = pedido.valor_total || pedido.valor;
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text(`VALOR TOTAL: ${formatCurrency(valorTotal)}`, 190, finalY, {
+          align: "right",
+        });
+
+        if (pedido.orcamento) {
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(100, 100, 100);
+          doc.text(
+            `Orçamento Mensal: ${formatCurrency(pedido.orcamento)}`,
+            190,
+            finalY + 7,
+            { align: "right" },
+          );
+        }
+
+        // Observations
+        if (pedido.observacoes) {
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "italic");
+          doc.setTextColor(70, 70, 70);
+          doc.text("Observações:", 20, finalY + 15);
+          const splitObs = doc.splitTextToSize(pedido.observacoes, 170);
+          doc.text(splitObs, 20, finalY + 22);
+        }
+
+        // Footer
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setFontSize(9);
+          doc.setTextColor(150, 150, 150);
+          doc.text(`Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
+          doc.text("Sistema de Requisição de Material - Ello Atacadão", 105, 290, {
+            align: "center",
+          });
+        }
+
+        doc.save(`Pedido_RM_${numero}.pdf`);
       };
 
       const PRODUCT_INTERNAL_CODES = {
@@ -900,10 +1017,45 @@
                       >
                         Compartilhar no WhatsApp
                       </a>
-                    );
-                  })()}
-              </div>
-            )}
+                      <button
+                        onClick={() => {
+                          // Create simplified pedido object for PDF
+                          const pedidoPDF = {
+                            numero: lastPedido.numero.replace("RM-", ""),
+                            mes: lastPedido.mes,
+                            valor: lastPedido.valor,
+                            cliente_nome: cliente,
+                            centro_custo: centroCusto,
+                            status: "pendente",
+                            observacoes: observacoes,
+                            orcamento: orcamento,
+                          };
+
+                          // Create itens array for PDF from cartItems
+                          const itensPDF = Object.entries(cartItems).map(
+                            ([prodId, qty]) => {
+                              const produto = produtos.find((p) => p.id === prodId);
+                              return {
+                                produtos: produto,
+                                quantidade: qty,
+                                preco_total: produto.preco_unitario * qty,
+                                preco_unitario: produto.preco_unitario,
+                              };
+                            },
+                          );
+
+                          generateOrderPDF(pedidoPDF, itensPDF);
+                        }}
+                        className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                      >
+                        <LucideDownload size={18} />
+                        Baixar PDF
+                      </button>
+                    </div>
+                  );
+                })()}
+            </div>
+          )}
 
             <h2 className="text-3xl font-bold text-gray-800 mb-6">
               Nova Requisição
@@ -1456,6 +1608,15 @@
                           >
                             Compartilhar no WhatsApp
                           </a>
+                          <button
+                            onClick={() =>
+                              generateOrderPDF(pedido, itensPedido[pedido.id])
+                            }
+                            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                          >
+                            <LucideDownload size={18} />
+                            Baixar PDF
+                          </button>
                         </div>
 
                         {/* Status Change (Admin Only) */}
