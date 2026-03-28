@@ -1811,6 +1811,7 @@
             for (const local of locais) {
               const item = getEstoqueItem(produto.id, local.id);
               rows.push({
+                "Código Interno": produto.id,
                 Código: produto.codigo_fornecedor,
                 Descrição: produto.nome,
                 Marca: produto.marca,
