@@ -1006,53 +1006,56 @@
                       encodeURIComponent(cliente) +
                       "%0A%0AAguardando aprovacao.";
                     return (
-                      <a
-                        href={
-                          "https://wa.me/?text=Requisicao%20de%20Material%20-%20Ello%20Atacadao%0A%0A" +
-                          waMsgNR
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
-                      >
-                        Compartilhar no WhatsApp
-                      </a>
-                      <button
-                        onClick={() => {
-                          // Create simplified pedido object for PDF
-                          const pedidoPDF = {
-                            numero: lastPedido.numero.replace("RM-", ""),
-                            mes: lastPedido.mes,
-                            valor: lastPedido.valor,
-                            cliente_nome: cliente,
-                            centro_custo: centroCusto,
-                            status: "pendente",
-                            observacoes: observacoes,
-                            orcamento: orcamento,
-                          };
+                      <div className="flex flex-col sm:flex-row gap-2 mt-4">
+                        <a
+                          href={
+                            "https://wa.me/?text=Requisicao%20de%20Material%20-%20Ello%20Atacadao%0A%0A" +
+                            waMsgNR
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
+                        >
+                          Compartilhar no WhatsApp
+                        </a>
+                        <button
+                          onClick={() => {
+                            // Create simplified pedido object for PDF
+                            const pedidoPDF = {
+                              numero: lastPedido.numero.replace("RM-", ""),
+                              mes: lastPedido.mes,
+                              valor: lastPedido.valor,
+                              cliente_nome: cliente,
+                              centro_custo: centroCusto,
+                              status: "pendente",
+                              observacoes: observacoes,
+                              orcamento: orcamento,
+                            };
 
-                          // Create itens array for PDF from cartItems
-                          const itensPDF = Object.entries(cartItems).map(
-                            ([prodId, qty]) => {
-                              const produto = produtos.find((p) => p.id === prodId);
-                              return {
-                                produtos: produto,
-                                quantidade: qty,
-                                preco_total: produto.preco_unitario * qty,
-                                preco_unitario: produto.preco_unitario,
-                              };
-                            },
-                          );
+                            // Create itens array for PDF from cartItems
+                            const itensPDF = Object.entries(cartItems).map(
+                              ([prodId, qty]) => {
+                                const produto = produtos.find(
+                                  (p) => p.id === prodId,
+                                );
+                                return {
+                                  produtos: produto,
+                                  quantidade: qty,
+                                  preco_total: produto.preco_unitario * qty,
+                                  preco_unitario: produto.preco_unitario,
+                                };
+                              },
+                            );
 
-                          generateOrderPDF(pedidoPDF, itensPDF);
-                        }}
-                        className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
-                      >
-                        <LucideDownload size={18} />
-                        Baixar PDF
-                      </button>
-                    </div>
-                  );
+                            generateOrderPDF(pedidoPDF, itensPDF);
+                          }}
+                          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
+                        >
+                          <LucideDownload size={18} />
+                          Baixar PDF
+                        </button>
+                      </div>
+                    );
                 })()}
             </div>
           )}
