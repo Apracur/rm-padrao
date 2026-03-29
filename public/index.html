@@ -300,15 +300,11 @@
 
         const tableData = itens.map((item) => {
           const nomeProduto = item.produtos?.nome || item.nome || "N/A";
-          const codInterno = PRODUCT_INTERNAL_CODES[nomeProduto];
-          const descVal = codInterno ? `${nomeProduto} (Cód Int: ${codInterno})` : nomeProduto;
+          const codInterno = getCodigoInterno(nomeProduto);
 
           const row = [
-            item.produtos?.codigo_fornecedor ||
-              item.codigo ||
-              item.produtos?.codigo ||
-              "N/A",
-            descVal,
+            codInterno,
+            nomeProduto,
             item.produtos?.marca || item.marca || "N/A",
             item.produtos?.unidade || item.unidade || "N/A",
             item.quantidade,
@@ -539,6 +535,25 @@
         "SACO VERMELHO DE 100 LT": "18161",
         "SACO VERMELHO DE 200 L": "18163",
         "SACO VERMELHO DE 500 L": "19761"
+      };
+
+      const getCodigoInterno = (nome) => {
+        if (!nome || nome === "N/A") return "XXXX";
+        if (PRODUCT_INTERNAL_CODES[nome]) {
+          return PRODUCT_INTERNAL_CODES[nome];
+        }
+        let hash = 0;
+        for (let i = 0; i < nome.length; i++) {
+          hash = nome.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        let result = '';
+        hash = Math.abs(hash) || 1234;
+        for (let i = 0; i < 4; i++) {
+          result += chars[hash % 26];
+          hash = Math.floor(hash / 26);
+        }
+        return result;
       };
 
       // Image Upload Component
@@ -979,9 +994,10 @@
         const filteredProdutos = useMemo(() => {
           return produtos.filter((p) => {
             const nome = String(p.nome || "").toLowerCase();
-            const codigo = String(p.codigo_fornecedor || "").toLowerCase();
+            const codigo = getCodigoInterno(p.nome).toLowerCase();
+            const codigoOriginal = String(p.codigo_fornecedor || "").toLowerCase();
             const busca = String(searchTerm || "").toLowerCase();
-            const matchSearch = nome.includes(busca) || codigo.includes(busca);
+            const matchSearch = nome.includes(busca) || codigo.includes(busca) || codigoOriginal.includes(busca);
             const matchBrand = !filterBrand || p.marca === filterBrand;
             return matchSearch && matchBrand;
           });
@@ -1449,7 +1465,7 @@
                               )}
                             </td>
                             <td className="px-6 py-4 font-medium text-gray-900">
-                              {produto.codigo_fornecedor}
+                              {getCodigoInterno(produto.nome)}
                             </td>
                             <td className="px-6 py-4 text-gray-700">
                               {produto.nome}
@@ -1764,7 +1780,7 @@
                                       {item.produtos.nome}
                                     </p>
                                     <p className="text-sm text-gray-600">
-                                      {item.produtos.codigo_fornecedor}
+                                      {getCodigoInterno(item.produtos.nome)}
                                     </p>
                                   </div>
                                   <div className="text-right">
@@ -1957,6 +1973,9 @@
             list = list.filter(
               (p) =>
                 String(p.nome || "")
+                  .toLowerCase()
+                  .includes(term) ||
+                getCodigoInterno(p.nome)
                   .toLowerCase()
                   .includes(term) ||
                 String(p.codigo_fornecedor || "")
@@ -2179,8 +2198,8 @@
 
                     const produto = produtos.find(
                       (p) =>
-                        (p.codigo_fornecedor || "").toLowerCase() ===
-                        codigo.toLowerCase(),
+                        getCodigoInterno(p.nome).toLowerCase() === codigo.toLowerCase() ||
+                        (p.codigo_fornecedor || "").toLowerCase() === codigo.toLowerCase(),
                     );
                     if (!produto) {
                       skipped.push({
@@ -2337,7 +2356,7 @@
             for (const local of locais) {
               const item = getEstoqueItem(produto.id, local.id);
               rows.push({
-                "Código Interno": PRODUCT_INTERNAL_CODES[produto.nome] || produto.id,
+                "Código Interno": getCodigoInterno(produto.nome),
                 Código: produto.codigo_fornecedor,
                 Descrição: produto.nome,
                 Marca: produto.marca,
@@ -2458,7 +2477,7 @@
                                   {upd.produto.nome}
                                 </p>
                                 <p className="text-xs text-gray-500">
-                                  {upd.produto.codigo_fornecedor}
+                                  {getCodigoInterno(upd.produto.nome)}
                                 </p>
                               </td>
                               <td className="px-3 py-2 text-gray-600 text-xs">
@@ -2649,7 +2668,7 @@
                           />
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                          {produto.codigo_fornecedor}
+                          {getCodigoInterno(produto.nome)}
                         </td>
                         <td className="px-4 py-3 text-gray-900 font-medium">
                           {produto.nome}
