@@ -1176,74 +1176,75 @@
                         >
                           Compartilhar no WhatsApp
                         </a>
-                          <div className="flex flex-col gap-2mt-4 w-full">
-                            <button
-                              onClick={() => {
-                                // Create simplified pedido object for PDF
-                                const pedidoPDF = {
-                                  numero: lastPedido.numero.replace("RM-", ""),
-                                  mes: lastPedido.mes,
-                                  valor: lastPedido.valor,
-                                  cliente_nome: cliente,
-                                  centro_custo: centroCusto,
-                                  status: "pendente",
-                                  observacoes: observacoes,
-                                  orcamento: orcamento,
-                                };
+                        <div className="flex flex-col gap-2 w-full">
+                          <button
+                            onClick={() => {
+                              // Create simplified pedido object for PDF
+                              const pedidoPDF = {
+                                numero: lastPedido.numero.replace("RM-", ""),
+                                mes: lastPedido.mes,
+                                valor: lastPedido.valor,
+                                cliente_nome: cliente,
+                                centro_custo: centroCusto,
+                                status: "pendente",
+                                observacoes: observacoes,
+                                orcamento: orcamento,
+                              };
 
-                                // Create itens array for PDF from cartItems
-                                const itensPDF = Object.entries(cartItems).map(
-                                  ([prodId, qty]) => {
-                                    const produto = produtos.find(
-                                      (p) => p.id === prodId,
-                                    );
-                                    return {
-                                      produtos: produto,
-                                      quantidade: qty,
-                                      preco_total: produto.preco_unitario * qty,
-                                      preco_unitario: produto.preco_unitario,
-                                    };
-                                  },
-                                );
+                              // Create itens array for PDF from cartItems
+                              const itensPDF = Object.entries(cartItems).map(
+                                ([prodId, qty]) => {
+                                  const produto = produtos.find(
+                                    (p) => p.id === prodId,
+                                  );
+                                  return {
+                                    produtos: produto,
+                                    quantidade: qty,
+                                    preco_total: produto.preco_unitario * qty,
+                                    preco_unitario: produto.preco_unitario,
+                                  };
+                                },
+                              );
 
-                                generateOrderPDF(pedidoPDF, itensPDF, false);
-                              }}
-                              className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
-                            >
-                              <LucideDownload size={18} />
-                              Baixar PDF Padrão
-                            </button>
-                            <button
-                              onClick={() => {
-                                const pedidoPDF = {
-                                  numero: lastPedido.numero.replace("RM-", ""),
-                                  mes: lastPedido.mes,
-                                  valor: lastPedido.valor,
-                                  cliente_nome: cliente,
-                                  centro_custo: centroCusto,
-                                  status: "pendente",
-                                  observacoes: observacoes,
-                                  orcamento: orcamento,
-                                };
-                                const itensPDF = Object.entries(cartItems).map(
-                                  ([prodId, qty]) => {
-                                    const produto = produtos.find((p) => p.id === prodId);
-                                    return {
-                                      produtos: produto,
-                                      quantidade: qty,
-                                      preco_total: produto.preco_unitario * qty,
-                                      preco_unitario: produto.preco_unitario,
-                                    };
-                                  },
-                                );
-                                generateOrderPDF(pedidoPDF, itensPDF, true);
-                              }}
-                              className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
-                            >
-                              <LucideImage size={18} />
-                              PDF c/ Imagens
-                            </button>
-                          </div>
+                              generateOrderPDF(pedidoPDF, itensPDF, false);
+                            }}
+                            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
+                          >
+                            <LucideDownload size={18} />
+                            Baixar PDF Padrão
+                          </button>
+                          <button
+                            onClick={() => {
+                              const pedidoPDF = {
+                                numero: lastPedido.numero.replace("RM-", ""),
+                                mes: lastPedido.mes,
+                                valor: lastPedido.valor,
+                                cliente_nome: cliente,
+                                centro_custo: centroCusto,
+                                status: "pendente",
+                                observacoes: observacoes,
+                                orcamento: orcamento,
+                              };
+                              const itensPDF = Object.entries(cartItems).map(
+                                ([prodId, qty]) => {
+                                  const produto = produtos.find((p) => p.id === prodId);
+                                  return {
+                                    produtos: produto,
+                                    quantidade: qty,
+                                    preco_total: produto.preco_unitario * qty,
+                                    preco_unitario: produto.preco_unitario,
+                                  };
+                                },
+                              );
+                              generateOrderPDF(pedidoPDF, itensPDF, true);
+                            }}
+                            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
+                          >
+                            <LucideImage size={18} />
+                            PDF c/ Imagens
+                          </button>
+                        </div>
+                      </div>
                     );
                 })()}
             </div>
