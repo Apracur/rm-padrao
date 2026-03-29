@@ -1,36 +1,36 @@
 # Como Fazer o Deploy do Sistema RM Padrão
 
+## Deploy automático (fluxo normal)
+
+O projeto já está conectado ao Vercel via GitHub. **Qualquer push para a branch `main` dispara um deploy automático.**
+
+```bash
+git add public/index.html
+git commit -m "descrição da mudança"
+git push
+```
+
+Em ~1 minuto o sistema estará atualizado em produção. Sem nenhum passo extra.
+
+---
+
 ## Dados do Supabase (já configurado)
 - **URL:** https://vejkkbotkggviqjempop.supabase.co
 - **Projeto:** RM Padrao - Requisicao de Material
 - **Banco de dados:** ✅ Configurado com 176 produtos
 
-## Opção 1 — Deploy no Vercel (Recomendado, gratuito)
+## Configuração inicial (já feita — apenas para referência)
 
-### Passo 1: Criar repositório no GitHub
-1. Acesse https://github.com/new
-2. Nome do repositório: `rm-padrao`
-3. Visibilidade: **Public**
-4. Clique em **Create repository**
+### GitHub
+- Repositório: https://github.com/Apracur/rm-padrao
 
-### Passo 2: Fazer upload dos arquivos
-1. No repositório criado, clique em **"uploading an existing file"**
-2. Faça upload de todos os arquivos da pasta `rm-padrao-sistema/`
-   - `public/index.html`
-   - `vercel.json`
-3. Clique em **Commit changes**
-
-### Passo 3: Deploy no Vercel
-1. Acesse https://vercel.com/new
-2. Clique em **"Import Git Repository"**
-3. Selecione o repositório `rm-padrao`
-4. Nas configurações de build, deixe tudo padrão (o vercel.json já cuida disso)
-5. Clique em **Deploy**
-6. Em ~2 minutos o sistema estará online!
+### Vercel
+- Projeto já importado do GitHub em https://vercel.com
+- O arquivo `vercel.json` na raiz do projeto define todas as configurações de build
 
 ---
 
-## Opção 2 — Testar localmente agora
+## Testar localmente
 Abra o arquivo `public/index.html` diretamente no navegador.
 O sistema já está conectado ao banco de dados Supabase e funciona imediatamente!
 

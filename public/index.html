@@ -745,6 +745,22 @@
         );
       }
 
+      // Hamburger icon
+      const LucideMenu = ({ size = 24, className = "" }) => (
+        <SvgIcon size={size} className={className}>
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </SvgIcon>
+      );
+
+      const LucideX = ({ size = 24, className = "" }) => (
+        <SvgIcon size={size} className={className}>
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </SvgIcon>
+      );
+
       // Sidebar Component
       function Sidebar({
         user,
@@ -752,6 +768,8 @@
         onLogout,
         currentPage,
         onPageChange,
+        isOpen,
+        onClose,
       }) {
         const [userProfile, setUserProfile] = useState(null);
 
@@ -793,12 +811,21 @@
         }
 
         return (
-          <div className="w-64 bg-blue-800 text-white flex flex-col h-screen shadow-lg">
-            <div className="p-6 border-b border-blue-700">
-              <h1 className="font-bold text-xl mb-2">Ello Atacadão</h1>
-              <p className="text-blue-100 text-sm">
-                RM - Requisição de Material
-              </p>
+          <div className={`fixed md:relative inset-y-0 left-0 z-40 w-64 bg-blue-800 text-white flex flex-col h-screen shadow-lg transform transition-transform duration-300 ease-in-out md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
+            <div className="p-6 border-b border-blue-700 flex items-center justify-between">
+              <div>
+                <h1 className="font-bold text-xl mb-1">Ello Atacadão</h1>
+                <p className="text-blue-100 text-sm">
+                  RM - Requisição de Material
+                </p>
+              </div>
+              <button
+                onClick={onClose}
+                className="md:hidden p-1 rounded hover:bg-blue-700 transition"
+                aria-label="Fechar menu"
+              >
+                <LucideX size={22} />
+              </button>
             </div>
 
             <div className="flex-1 overflow-y-auto">
@@ -808,7 +835,7 @@
                   return (
                     <button
                       key={item.id}
-                      onClick={() => onPageChange(item.id)}
+                      onClick={() => { onPageChange(item.id); onClose(); }}
                       className={`w-full text-left px-4 py-3 rounded-lg transition duration-200 flex items-center gap-3 ${
                         currentPage === item.id
                           ? "bg-blue-900 font-medium"
@@ -1143,7 +1170,7 @@
         };
 
         return (
-          <div className="p-6 max-w-7xl mx-auto">
+          <div className="p-4 sm:p-6 max-w-7xl mx-auto">
             {!userLocalId && (
               <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-6 rounded">
                 <div className="flex gap-3">
@@ -1162,7 +1189,7 @@
             )}
 
             {showSuccess && (
-              <div className="fixed top-4 right-4 bg-green-50 border border-green-200 rounded-lg p-4 flex flex-col gap-3 max-w-md shadow-lg">
+              <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-md bg-green-50 border border-green-200 rounded-lg p-4 flex flex-col gap-3 shadow-lg z-50">
                 <div className="flex items-start gap-3">
                   <span className="text-green-600 text-xl">✓</span>
                   <div>
@@ -1278,7 +1305,7 @@
             </h2>
 
             {/* Budget Summary */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
               <div className="bg-white rounded-lg p-4 border border-gray-200">
                 <p className="text-gray-600 text-sm mb-1">
                   Orçamento Disponível
@@ -1334,7 +1361,7 @@
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Date and Observations */}
-              <div className="grid grid-cols-2 gap-6 bg-white rounded-lg p-6 border border-gray-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-white rounded-lg p-4 sm:p-6 border border-gray-200">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Mês de Referência
@@ -1360,7 +1387,7 @@
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg p-6 border border-gray-200">
+              <div className="bg-white rounded-lg p-4 sm:p-6 border border-gray-200">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Observações
                 </label>
@@ -1374,7 +1401,7 @@
               </div>
 
               {/* Search and Filter */}
-              <div className="grid grid-cols-2 gap-4 bg-white rounded-lg p-6 border border-gray-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white rounded-lg p-4 sm:p-6 border border-gray-200">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Buscar Produto
@@ -1693,7 +1720,7 @@
         }
 
         return (
-          <div className="p-6 max-w-6xl mx-auto">
+          <div className="p-4 sm:p-6 max-w-6xl mx-auto">
             <h2 className="text-3xl font-bold text-gray-800 mb-6">
               Meus Pedidos
             </h2>
@@ -1717,18 +1744,18 @@
                       onClick={() => handleExpandClick(pedido.id)}
                       className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition"
                     >
-                      <div className="flex items-center gap-6 flex-1 text-left">
+                      <div className="flex items-center gap-3 sm:gap-6 flex-1 text-left min-w-0">
                         <div className="min-w-0">
-                          <p className="font-semibold text-gray-900">
+                          <p className="font-semibold text-gray-900 text-sm sm:text-base">
                             {pedido.numero_pedido}
                           </p>
-                          <p className="text-sm text-gray-600 mt-1">
+                          <p className="text-xs sm:text-sm text-gray-600 mt-1">
                             {formatDate(pedido.created_at)} •{" "}
                             {getMonthName(pedido.mes_referencia)}
                           </p>
                         </div>
-                        <div className="hidden sm:block">
-                          <p className="text-2xl font-bold text-gray-900">
+                        <div className="hidden sm:block flex-shrink-0">
+                          <p className="text-xl font-bold text-gray-900">
                             {formatCurrency(pedido.valor_total)}
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
@@ -1737,9 +1764,9 @@
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
                         <span
-                          className={`px-4 py-2 rounded-full text-sm font-medium border ${getStatusColor(pedido.status)}`}
+                          className={`px-2 sm:px-4 py-1 sm:py-2 rounded-full text-xs sm:text-sm font-medium border ${getStatusColor(pedido.status)}`}
                         >
                           {getStatusLabel(pedido.status)}
                         </span>
@@ -1753,7 +1780,7 @@
                     {expandedId === pedido.id && (
                       <div className="border-t border-gray-200 px-6 py-4 bg-gray-50">
                         {/* Order Details */}
-                        <div className="grid grid-cols-2 gap-4 mb-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                           <div>
                             <p className="text-sm text-gray-600">Local</p>
                             <p className="font-medium text-gray-900">
@@ -1820,7 +1847,7 @@
                         )}
 
                         {/* WhatsApp Share Button */}
-                        <div className="mb-4">
+                        <div className="mb-4 flex flex-col sm:flex-row flex-wrap gap-2">
                           <a
                             href={
                               "https://wa.me/?text=Requisicao%20de%20Material%0A%0APedido:%20RM-" +
@@ -1836,11 +1863,11 @@
                             }
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                            className="inline-flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
                           >
                             Compartilhar no WhatsApp
                           </a>
-                          <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                          <div className="flex gap-2">
                             <button
                               onClick={() =>
                                 generateOrderPDF(pedido, itensPedido[pedido.id], false)
@@ -1868,7 +1895,7 @@
                             <p className="text-sm font-medium text-gray-700 mb-3">
                               Alterar Status
                             </p>
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2">
                               {[
                                 "pendente",
                                 "aprovado",
@@ -2421,7 +2448,7 @@
         }
 
         return (
-          <div className="p-6 max-w-7xl mx-auto">
+          <div className="p-4 sm:p-6 max-w-7xl mx-auto">
             {/* Toasts */}
             {successMsg && (
               <div className="fixed top-4 right-4 bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3 max-w-sm shadow-lg z-50">
@@ -2554,25 +2581,26 @@
             )}
 
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-3xl font-bold text-gray-800">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+              <h2 className="text-2xl sm:text-3xl font-bold text-gray-800">
                 Gestão de Estoque
               </h2>
               <div className="flex gap-2">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadingFile}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition flex items-center gap-2"
+                  className="bg-green-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition flex items-center gap-2 text-sm"
                 >
                   <LucideUpload size={18} />
-                  {uploadingFile ? "Lendo arquivo..." : "Importar Excel"}
+                  <span className="hidden sm:inline">{uploadingFile ? "Lendo..." : "Importar Excel"}</span>
+                  <span className="sm:hidden">{uploadingFile ? "..." : "Importar"}</span>
                 </button>
                 <button
                   onClick={handleExport}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+                  className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm sm:text-base"
                 >
                   <LucideDownload size={18} />
-                  Exportar Excel
+                  <span>Exportar</span>
                 </button>
               </div>
             </div>
@@ -2595,8 +2623,8 @@
             </div>
 
             {/* Filters */}
-            <div className="flex gap-4 mb-4">
-              <div className="relative flex-1 max-w-sm">
+            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+              <div className="relative flex-1 sm:max-w-sm">
                 <LucideSearch
                   className="absolute left-3 top-2.5 text-gray-400"
                   size={18}
@@ -2613,7 +2641,7 @@
                 <select
                   value={filterLocal}
                   onChange={(e) => setFilterLocal(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                  className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                 >
                   <option value="">Todos os locais</option>
                   {locais.map((l) => (
@@ -2759,7 +2787,7 @@
 
             {/* Sticky save bar */}
             {pendingCount > 0 && (
-              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-gray-200 shadow-2xl rounded-xl px-6 py-4 flex items-center gap-4 z-40">
+              <div className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 bg-white border border-gray-200 shadow-2xl rounded-xl px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3 sm:gap-4 z-40">
                 <div className="text-sm text-gray-700">
                   <span className="font-bold text-blue-800">
                     {pendingCount}
@@ -3066,8 +3094,8 @@
         }
 
         return (
-          <div className="p-6 max-w-6xl mx-auto">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">
+          <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">
               Configurações
             </h2>
 
@@ -3095,7 +3123,7 @@
                   <h4 className="font-semibold text-blue-900 mb-3">
                     Adicionar Novo Usuário
                   </h4>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Nome Completo *
@@ -3169,7 +3197,7 @@
                         <option value="admin">Administrador</option>
                       </select>
                     </div>
-                    <div className="col-span-2">
+                    <div className="col-span-1 sm:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Local de Atuação *
                       </label>
@@ -3225,7 +3253,7 @@
                 {usuarios.map((usuario) => (
                   <div
                     key={usuario.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200"
                   >
                     <div>
                       <p className="font-medium text-gray-900">
@@ -3236,7 +3264,7 @@
                         Local: {usuario.locais?.nome || "Nenhum"}
                       </p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       {editingUserLocal === usuario.id ? (
                         <div className="flex items-center gap-2">
                           <select
@@ -3338,7 +3366,7 @@
                   <h4 className="font-semibold text-blue-900 mb-3">
                     Adicionar Novo Local
                   </h4>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Nome *
@@ -3704,14 +3732,14 @@
         }
 
         return (
-          <div className="p-6 max-w-7xl mx-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-3xl font-bold text-gray-800">
+          <div className="p-4 sm:p-6 max-w-7xl mx-auto">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+              <h2 className="text-2xl sm:text-3xl font-bold text-gray-800">
                 Gestão de Produtos
               </h2>
               <button
                 onClick={openNovo}
-                className="bg-blue-800 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-900 transition"
+                className="bg-blue-800 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-900 transition self-start sm:self-auto"
               >
                 <LucidePlus size={18} />
                 Novo Produto
@@ -3940,6 +3968,7 @@
         const [userRole, setUserRole] = useState(null);
         const [loading, setLoading] = useState(true);
         const [currentPage, setCurrentPage] = useState("nova-requisicao");
+        const [sidebarOpen, setSidebarOpen] = useState(false);
 
         useEffect(() => {
           checkAuth();
@@ -4018,15 +4047,37 @@
 
         return (
           <div className="flex h-screen bg-gray-100">
+            {/* Mobile overlay */}
+            {sidebarOpen && (
+              <div
+                className="fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden"
+                onClick={() => setSidebarOpen(false)}
+              />
+            )}
+
             <Sidebar
               user={user}
               userRole={userRole}
               onLogout={handleLogout}
               currentPage={currentPage}
               onPageChange={setCurrentPage}
+              isOpen={sidebarOpen}
+              onClose={() => setSidebarOpen(false)}
             />
 
             <main className="flex-1 overflow-y-auto">
+              {/* Mobile top bar */}
+              <div className="md:hidden sticky top-0 z-20 bg-blue-800 text-white px-4 py-3 flex items-center gap-3 shadow-md">
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="p-1 rounded hover:bg-blue-700 transition"
+                  aria-label="Abrir menu"
+                >
+                  <LucideMenu size={24} />
+                </button>
+                <span className="font-bold text-lg">Ello Atacadão</span>
+              </div>
+
               {currentPage === "nova-requisicao" && (
                 <NovaRequisicao user={user} userRole={userRole} />
               )}
