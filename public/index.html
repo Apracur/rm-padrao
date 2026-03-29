@@ -166,6 +166,13 @@
           <line x1="22" y1="11" x2="16" y2="11" />
         </SvgIcon>
       );
+      const LucideImage = ({ size = 20, className = "" }) => (
+        <SvgIcon size={size} className={className}>
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <polyline points="21 15 16 10 5 21" />
+        </SvgIcon>
+      );
 
       // Supabase client
       const supabaseUrl = "https://vejkkbotkggviqjempop.supabase.co";
@@ -208,7 +215,22 @@
         return `${months[parseInt(month) - 1]}/${year}`;
       };
 
-      const generateOrderPDF = (pedido, itens) => {
+      const getBase64Image = async (url) => {
+        try {
+          const res = await fetch(url);
+          const blob = await res.blob();
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) {
+          console.warn("Erro ao carregar imagem para o PDF:", e);
+          return null;
+        }
+      };
+
+      const generateOrderPDF = async (pedido, itens, comImagem = false) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
 
@@ -244,13 +266,44 @@
         doc.text(`Centro de Custo: ${pedido.centro_custo || "N/A"}`, 120, 52);
         doc.text(`Status: ${statusParaPDF}`, 120, 59);
 
-        // Table
+        // Table Settings
+        let head = [
+          ["Cód.", "Descrição", "Marca", "Unid.", "Qtd.", "P. Unit", "Subtotal"],
+        ];
+        let columnStyles = {
+          4: { halign: "center" },
+          5: { halign: "right" },
+          6: { halign: "right" },
+        };
+
+        if (comImagem) {
+          head = [
+            ["Foto", "Cód.", "Descrição", "Marca", "Unid.", "Qtd.", "P. Unit", "Subtotal"],
+          ];
+          columnStyles = {
+            0: { cellWidth: 20 },
+            5: { halign: "center" },
+            6: { halign: "right" },
+            7: { halign: "right" },
+          };
+        }
+
+        const imagesBase64 = {};
+        if (comImagem) {
+          for (const item of itens) {
+            const url = item.produtos?.imagem_url;
+            if (url && !imagesBase64[url]) {
+              imagesBase64[url] = await getBase64Image(url);
+            }
+          }
+        }
+
         const tableData = itens.map((item) => {
           const nomeProduto = item.produtos?.nome || item.nome || "N/A";
           const codInterno = PRODUCT_INTERNAL_CODES[nomeProduto];
           const descVal = codInterno ? `${nomeProduto} (Cód Int: ${codInterno})` : nomeProduto;
 
-          return [
+          const row = [
             item.produtos?.codigo_fornecedor ||
               item.codigo ||
               item.produtos?.codigo ||
@@ -264,20 +317,36 @@
             ),
             formatCurrency(item.preco_total),
           ];
+
+          if (comImagem) {
+            row.unshift(""); // Empty slot for the picture
+          }
+          return row;
         });
 
         doc.autoTable({
           startY: 70,
-          head: [
-            ["Cód.", "Descrição", "Marca", "Unid.", "Qtd.", "P. Unit", "Subtotal"],
-          ],
+          head: head,
           body: tableData,
           theme: "striped",
           headStyles: { fillColor: [30, 58, 138], textColor: 255 },
-          columnStyles: {
-            4: { halign: "center" },
-            5: { halign: "right" },
-            6: { halign: "right" },
+          columnStyles: columnStyles,
+          bodyStyles: comImagem ? { minCellHeight: 20, valign: "middle" } : {},
+          didDrawCell: function (data) {
+            if (comImagem && data.section === "body" && data.column.index === 0) {
+              const itemRowIndex = data.row.index;
+              const item = itens[itemRowIndex];
+              const url = item?.produtos?.imagem_url;
+              if (url && imagesBase64[url]) {
+                try {
+                  const imgData = imagesBase64[url];
+                  // If base64 contains the JPEG/PNG prefix, autotable accepts it natively
+                  doc.addImage(imgData, data.cell.x + 2, data.cell.y + 2, 16, 16);
+                } catch (e) {
+                  console.warn("Error drawing image in jsPDF", e);
+                }
+              }
+            }
           },
         });
 
@@ -471,6 +540,89 @@
         "SACO VERMELHO DE 200 L": "18163",
         "SACO VERMELHO DE 500 L": "19761"
       };
+
+      // Image Upload Component
+      function ImageUploadCell({ produto, onUploadComplete }) {
+        const [uploading, setUploading] = useState(false);
+        const fileInputRef = useRef(null);
+
+        const handleImageClick = () => {
+          fileInputRef.current?.click();
+        };
+
+        const handleFileChange = async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+
+          if (file.size > 2 * 1024 * 1024) {
+            alert("A imagem deve ter no máximo 2MB.");
+            return;
+          }
+
+          setUploading(true);
+          try {
+            const ext = file.name.split(".").pop();
+            const fileName = `${produto.id}_${Date.now()}.${ext}`;
+
+            const { error: uploadError } = await supabase.storage
+              .from("produtos-imagens")
+              .upload(fileName, file, { cacheControl: "3600", upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            const { data: publicUrlData } = supabase.storage
+              .from("produtos-imagens")
+              .getPublicUrl(fileName);
+
+            const imageUrl = publicUrlData.publicUrl;
+
+            const { error: updateError } = await supabase
+              .from("produtos")
+              .update({ imagem_url: imageUrl })
+              .eq("id", produto.id);
+
+            if (updateError) throw updateError;
+
+            if (onUploadComplete) onUploadComplete(produto.id, imageUrl);
+          } catch (err) {
+            console.error("Erro ao subir imagem:", err);
+            alert("Erro ao enviar imagem: " + err.message);
+          } finally {
+            setUploading(false);
+          }
+        };
+
+        return (
+          <div
+            className="relative w-10 h-10 flex-shrink-0 group cursor-pointer"
+            onClick={handleImageClick}
+            title="Clique para alterar a imagem do produto"
+          >
+            {uploading ? (
+              <div className="w-full h-full bg-gray-100 rounded border border-gray-300 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              </div>
+            ) : produto.imagem_url ? (
+              <img
+                src={produto.imagem_url}
+                alt={produto.nome}
+                className="w-full h-full object-cover rounded border border-gray-200 group-hover:opacity-75 transition"
+              />
+            ) : (
+              <div className="w-full h-full bg-gray-50 rounded border border-gray-300 flex items-center justify-center group-hover:bg-blue-50 transition text-gray-400">
+                <LucideImage size={20} />
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </div>
+        );
+      }
 
       // Login Component
       function LoginPage({ onLogin }) {
@@ -1024,43 +1176,74 @@
                         >
                           Compartilhar no WhatsApp
                         </a>
-                        <button
-                          onClick={() => {
-                            // Create simplified pedido object for PDF
-                            const pedidoPDF = {
-                              numero: lastPedido.numero.replace("RM-", ""),
-                              mes: lastPedido.mes,
-                              valor: lastPedido.valor,
-                              cliente_nome: cliente,
-                              centro_custo: centroCusto,
-                              status: "pendente",
-                              observacoes: observacoes,
-                              orcamento: orcamento,
-                            };
-
-                            // Create itens array for PDF from cartItems
-                            const itensPDF = Object.entries(cartItems).map(
-                              ([prodId, qty]) => {
-                                const produto = produtos.find(
-                                  (p) => p.id === prodId,
-                                );
-                                return {
-                                  produtos: produto,
-                                  quantidade: qty,
-                                  preco_total: produto.preco_unitario * qty,
-                                  preco_unitario: produto.preco_unitario,
+                          <div className="flex flex-col gap-2mt-4 w-full">
+                            <button
+                              onClick={() => {
+                                // Create simplified pedido object for PDF
+                                const pedidoPDF = {
+                                  numero: lastPedido.numero.replace("RM-", ""),
+                                  mes: lastPedido.mes,
+                                  valor: lastPedido.valor,
+                                  cliente_nome: cliente,
+                                  centro_custo: centroCusto,
+                                  status: "pendente",
+                                  observacoes: observacoes,
+                                  orcamento: orcamento,
                                 };
-                              },
-                            );
 
-                            generateOrderPDF(pedidoPDF, itensPDF);
-                          }}
-                          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
-                        >
-                          <LucideDownload size={18} />
-                          Baixar PDF
-                        </button>
-                      </div>
+                                // Create itens array for PDF from cartItems
+                                const itensPDF = Object.entries(cartItems).map(
+                                  ([prodId, qty]) => {
+                                    const produto = produtos.find(
+                                      (p) => p.id === prodId,
+                                    );
+                                    return {
+                                      produtos: produto,
+                                      quantidade: qty,
+                                      preco_total: produto.preco_unitario * qty,
+                                      preco_unitario: produto.preco_unitario,
+                                    };
+                                  },
+                                );
+
+                                generateOrderPDF(pedidoPDF, itensPDF, false);
+                              }}
+                              className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
+                            >
+                              <LucideDownload size={18} />
+                              Baixar PDF Padrão
+                            </button>
+                            <button
+                              onClick={() => {
+                                const pedidoPDF = {
+                                  numero: lastPedido.numero.replace("RM-", ""),
+                                  mes: lastPedido.mes,
+                                  valor: lastPedido.valor,
+                                  cliente_nome: cliente,
+                                  centro_custo: centroCusto,
+                                  status: "pendente",
+                                  observacoes: observacoes,
+                                  orcamento: orcamento,
+                                };
+                                const itensPDF = Object.entries(cartItems).map(
+                                  ([prodId, qty]) => {
+                                    const produto = produtos.find((p) => p.id === prodId);
+                                    return {
+                                      produtos: produto,
+                                      quantidade: qty,
+                                      preco_total: produto.preco_unitario * qty,
+                                      preco_unitario: produto.preco_unitario,
+                                    };
+                                  },
+                                );
+                                generateOrderPDF(pedidoPDF, itensPDF, true);
+                              }}
+                              className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1"
+                            >
+                              <LucideImage size={18} />
+                              PDF c/ Imagens
+                            </button>
+                          </div>
                     );
                 })()}
             </div>
@@ -1211,6 +1394,9 @@
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
+                        <th className="px-6 py-3 text-center font-semibold text-gray-700 w-16">
+                          Foto
+                        </th>
                         <th className="px-6 py-3 text-left font-semibold text-gray-700">
                           Código
                         </th>
@@ -1248,6 +1434,19 @@
                             key={produto.id}
                             className="hover:bg-blue-50 transition"
                           >
+                            <td className="px-6 py-4">
+                              {produto.imagem_url ? (
+                                <img
+                                  src={produto.imagem_url}
+                                  alt={produto.nome}
+                                  className="w-10 h-10 object-cover rounded border border-gray-200"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 bg-gray-50 rounded border border-gray-200 flex items-center justify-center text-gray-400">
+                                  <LucideImage size={20} />
+                                </div>
+                              )}
+                            </td>
                             <td className="px-6 py-4 font-medium text-gray-900">
                               {produto.codigo_fornecedor}
                             </td>
@@ -1379,7 +1578,7 @@
           try {
             const { data, error } = await supabase
               .from("itens_pedido")
-              .select("*, produtos(nome, codigo_fornecedor, marca, unidade)")
+              .select("*, produtos(nome, codigo_fornecedor, marca, unidade, imagem_url)")
               .eq("pedido_id", pedidoId);
 
             if (error) throw error;
@@ -1617,15 +1816,26 @@
                           >
                             Compartilhar no WhatsApp
                           </a>
-                          <button
-                            onClick={() =>
-                              generateOrderPDF(pedido, itensPedido[pedido.id])
-                            }
-                            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
-                          >
-                            <LucideDownload size={18} />
-                            Baixar PDF
-                          </button>
+                          <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                            <button
+                              onClick={() =>
+                                generateOrderPDF(pedido, itensPedido[pedido.id], false)
+                              }
+                              className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1 sm:flex-none"
+                            >
+                              <LucideDownload size={18} />
+                              PDF Padrão
+                            </button>
+                            <button
+                              onClick={() =>
+                                generateOrderPDF(pedido, itensPedido[pedido.id], true)
+                              }
+                              className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1 sm:flex-none"
+                            >
+                              <LucideImage size={18} />
+                              PDF c/ Imagens
+                            </button>
+                          </div>
                         </div>
 
                         {/* Status Change (Admin Only) */}
@@ -2394,6 +2604,9 @@
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
+                      <th className="px-4 py-3 text-center font-semibold text-gray-700 w-16">
+                        Foto
+                      </th>
                       <th className="px-4 py-3 text-left font-semibold text-gray-700 w-32">
                         Código
                       </th>
@@ -2422,6 +2635,18 @@
                         key={produto.id}
                         className="hover:bg-blue-50 transition"
                       >
+                        <td className="px-4 py-3">
+                          <ImageUploadCell
+                            produto={produto}
+                            onUploadComplete={(id, url) =>
+                              setProdutos((prev) =>
+                                prev.map((p) =>
+                                  p.id === id ? { ...p, imagem_url: url } : p
+                                )
+                              )
+                            }
+                          />
+                        </td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-700">
                           {produto.codigo_fornecedor}
                         </td>
