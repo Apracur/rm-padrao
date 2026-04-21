@@ -1240,15 +1240,19 @@
         const exceedsBudget = totalValue > orcamento;
 
         const filteredProdutos = useMemo(() => {
-          return produtos.filter((p) => {
-            const nome = String(p.nome || "").toLowerCase();
-            const codigo = getCodigoInterno(p.nome).toLowerCase();
-            const codigoOriginal = String(p.codigo_fornecedor || "").toLowerCase();
-            const busca = String(searchTerm || "").toLowerCase();
-            const matchSearch = nome.includes(busca) || codigo.includes(busca) || codigoOriginal.includes(busca);
-            const matchBrand = !filterBrand || p.marca === filterBrand;
-            return matchSearch && matchBrand;
-          });
+          return produtos
+            .filter((p) => {
+              const nome = String(p.nome || "").toLowerCase();
+              const codigo = getCodigoInterno(p.nome).toLowerCase();
+              const codigoOriginal = String(p.codigo_fornecedor || "").toLowerCase();
+              const busca = String(searchTerm || "").toLowerCase();
+              const matchSearch = nome.includes(busca) || codigo.includes(busca) || codigoOriginal.includes(busca);
+              const matchBrand = !filterBrand || p.marca === filterBrand;
+              return matchSearch && matchBrand;
+            })
+            .sort((a, b) =>
+              String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { sensitivity: "base" })
+            );
         }, [produtos, searchTerm, filterBrand]);
 
         const uniqueBrands = useMemo(() => {
@@ -1819,14 +1823,24 @@
             setLoading(true);
             let query = supabase
               .from("pedidos")
-              .select("*, locais(nome)")
+              .select("*, locais(nome), perfis:usuario_id(nome, email)")
               .order("created_at", { ascending: false });
 
             if (userRole !== "admin") {
               const {
                 data: { user: authUser },
               } = await supabase.auth.getUser();
-              query = query.eq("usuario_id", authUser.id);
+              const { data: perfil, error: perfilError } = await supabase
+                .from("perfis")
+                .select("local_id")
+                .eq("id", authUser.id)
+                .single();
+              if (perfilError) throw perfilError;
+              if (perfil?.local_id) {
+                query = query.eq("local_id", perfil.local_id);
+              } else {
+                query = query.eq("usuario_id", authUser.id);
+              }
             }
 
             const { data, error } = await query;
@@ -1967,6 +1981,11 @@
                             {formatDate(pedido.created_at)} •{" "}
                             {getMonthName(pedido.mes_referencia)}
                           </p>
+                          {pedido.perfis && (
+                            <p className="text-xs text-gray-500 mt-0.5 truncate">
+                              Por: {pedido.perfis.nome || pedido.perfis.email}
+                            </p>
+                          )}
                         </div>
                         <div className="hidden sm:block flex-shrink-0">
                           <p className="text-xl font-bold text-gray-900">
