@@ -75,10 +75,12 @@ serve(async (req) => {
     const basicAuth = btoa(`${clicUser}:${clicPass}`);
     const url = `${baseUrl}/clicVendas/rest/Listas/produtosPedido`;
 
-    // A API cap-a o retorno em 100 itens por chamada. Para trazer o
-    // catálogo completo, iteramos pelo campo "filtro" com cada letra/
-    // dígito possível e deduplicamos pelo código do produto.
-    const fetchFiltro = async (filtro: string) => {
+    // A API tem cap de 100 itens por chamada. Para trazer o catálogo
+    // completo iteramos por prefixos alfanuméricos e deduplicamos.
+    const CAP = 100;
+    const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("");
+
+    const fetchFiltro = async (filtro: string): Promise<any[]> => {
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -92,40 +94,61 @@ serve(async (req) => {
           idCvTolistapreco: Number(listaPrecoId),
         }),
       });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(
-          `ClicVendas ${res.status} em filtro="${filtro}": ${text.slice(0, 120)}`,
-        );
+      if (!res.ok) return [];
+      try {
+        return (await res.json()) as any[];
+      } catch {
+        return [];
       }
-      return (await res.json()) as any[];
     };
-
-    const filtros = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("");
-    const batches = await Promise.all(filtros.map((f) => fetchFiltro(f)));
-    const allItems = batches.flat();
-    const filtroStats: Record<string, number> = {};
-    for (let i = 0; i < filtros.length; i++) {
-      filtroStats[filtros[i]] = batches[i].length;
-    }
 
     const clicMap = new Map<
       string,
       { preco: number; imgId: string; nome: string }
     >();
-    for (const item of allItems) {
-      const p = item?.produto;
-      if (!p) continue;
-      const codigo = p.codExterno ?? p.codigo ?? p.codInterno ?? p.id;
-      if (codigo === undefined || codigo === null || codigo === "") continue;
-      const key = String(codigo).trim();
-      if (clicMap.has(key)) continue;
-      clicMap.set(key, {
-        preco: Number(item.preco) || 0,
-        imgId: String(p.imgProduto || "").trim(),
-        nome: String(p.nome || ""),
-      });
+    const ingest = (items: any[]) => {
+      for (const item of items) {
+        const p = item?.produto;
+        if (!p) continue;
+        const codigo = p.codExterno ?? p.codigo ?? p.codInterno ?? p.id;
+        if (codigo === undefined || codigo === null || codigo === "") continue;
+        const key = String(codigo).trim();
+        if (clicMap.has(key)) continue;
+        clicMap.set(key, {
+          preco: Number(item.preco) || 0,
+          imgId: String(p.imgProduto || "").trim(),
+          nome: String(p.nome || ""),
+        });
+      }
+    };
+
+    // Fase 1: varredura por 1 char.
+    const phase1 = await Promise.all(CHARS.map((c) => fetchFiltro(c)));
+    phase1.forEach((items) => ingest(items));
+
+    // Fase 2: onde a fase 1 bateu no cap, recurse com 2 chars.
+    const truncated1 = CHARS.filter((_, i) => phase1[i].length >= CAP);
+    const phase2Pairs: string[] = [];
+    const phase2Calls: Promise<any[]>[] = [];
+    for (const c1 of truncated1) {
+      for (const c2 of CHARS) {
+        phase2Pairs.push(c1 + c2);
+        phase2Calls.push(fetchFiltro(c1 + c2));
+      }
     }
+    const phase2 = await Promise.all(phase2Calls);
+    phase2.forEach((items) => ingest(items));
+
+    // Fase 3: onde a fase 2 bateu no cap, recurse com 3 chars.
+    const truncated2 = phase2Pairs.filter((_, i) => phase2[i].length >= CAP);
+    const phase3Calls: Promise<any[]>[] = [];
+    for (const pair of truncated2) {
+      for (const c of CHARS) {
+        phase3Calls.push(fetchFiltro(pair + c));
+      }
+    }
+    const phase3 = await Promise.all(phase3Calls);
+    phase3.forEach((items) => ingest(items));
 
     // Busca produtos do Supabase que têm codigo_interno.
     const { data: produtos, error: prodErr } = await supabase
@@ -135,6 +158,25 @@ serve(async (req) => {
       )
       .not("codigo_interno", "is", null);
     if (prodErr) throw prodErr;
+
+    // Fase 4: para produtos do sistema ainda sem correspondência, busca
+    // pelo nome (primeiros N chars) como filtro. Cobre produtos raros
+    // que não saíram na varredura alfabética.
+    const faltantesApos123 = (produtos || []).filter((p) => {
+      const cod = String(p.codigo_interno ?? "").trim();
+      return cod && cod !== "0" && !clicMap.has(cod);
+    });
+    const prefixosNome = Array.from(
+      new Set(
+        faltantesApos123
+          .map((p) => (p.nome || "").trim().slice(0, 6).toUpperCase())
+          .filter((s) => s.length >= 2),
+      ),
+    );
+    const phase4 = await Promise.all(
+      prefixosNome.map((pre) => fetchFiltro(pre)),
+    );
+    phase4.forEach((items) => ingest(items));
 
     let updated = 0;
     let notFound = 0;
@@ -147,16 +189,19 @@ serve(async (req) => {
       diferenca: number;
     }> = [];
     const erros: Array<{ id: string; nome: string; error: string }> = [];
+    const faltantes: Array<{ cod: string; nome: string }> = [];
 
     for (const prod of produtos || []) {
       const cod = String(prod.codigo_interno).trim();
       if (!cod || cod === "0") {
         notFound++;
+        faltantes.push({ cod: cod || "0", nome: prod.nome });
         continue;
       }
       const clic = clicMap.get(cod);
       if (!clic) {
         notFound++;
+        faltantes.push({ cod, nome: prod.nome });
         continue;
       }
 
@@ -204,7 +249,6 @@ serve(async (req) => {
 
     return jsonResponse({
       total_clic: clicMap.size,
-      total_clic_bruto: allItems.length,
       total_sistema: produtos?.length || 0,
       atualizados: updated,
       nao_encontrados: notFound,
@@ -212,7 +256,14 @@ serve(async (req) => {
       erros,
       amostra_codigos_clicvendas: amostraClic,
       amostra_codigos_sistema: amostraSistema,
-      filtros_stats: filtroStats,
+      faltantes,
+      chamadas: {
+        fase1: phase1.length,
+        fase2: phase2.length,
+        fase3: phase3.length,
+        fase4: phase4.length,
+        total: phase1.length + phase2.length + phase3.length + phase4.length,
+      },
     });
   } catch (err) {
     return jsonResponse(

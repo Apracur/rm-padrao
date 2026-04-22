@@ -3799,14 +3799,14 @@
                           </div>
                           <div>
                             <div className="font-semibold text-yellow-900 mb-1">
-                              Sistema (codigo_fornecedor)
+                              Sistema (codigo_interno)
                             </div>
                             <ul className="bg-white rounded border border-yellow-200 p-2 space-y-1 font-mono">
                               {syncResult.amostra_codigos_sistema.length ===
                               0 ? (
                                 <li className="text-red-700">
-                                  Nenhum produto do sistema tem
-                                  codigo_fornecedor preenchido!
+                                  Nenhum produto do sistema tem codigo_interno
+                                  preenchido!
                                 </li>
                               ) : (
                                 syncResult.amostra_codigos_sistema.map(
@@ -3839,6 +3839,40 @@
                         ))}
                       </ul>
                     </div>
+                  )}
+
+                  {syncResult.faltantes?.length > 0 && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                      <h4 className="font-semibold text-orange-900 mb-2">
+                        {syncResult.faltantes.length} produto(s) do sistema sem
+                        correspondência no ClicVendas
+                      </h4>
+                      <p className="text-xs text-orange-800 mb-2">
+                        Estes produtos têm codigo_interno que não existe na
+                        lista de preço do ClicVendas (ou o código está 0).
+                        Verifique se o codigo_interno está correto.
+                      </p>
+                      <div className="max-h-64 overflow-y-auto">
+                        <ul className="text-xs text-orange-900 font-mono space-y-1">
+                          {syncResult.faltantes.map((f, i) => (
+                            <li key={i}>
+                              <span className="text-blue-700">{f.cod}</span> —{" "}
+                              {f.nome}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {syncResult.chamadas && (
+                    <p className="text-xs text-gray-500">
+                      {syncResult.chamadas.total} chamada(s) ao ClicVendas (fase
+                      1: {syncResult.chamadas.fase1}, fase 2:{" "}
+                      {syncResult.chamadas.fase2}, fase 3:{" "}
+                      {syncResult.chamadas.fase3}, fase 4:{" "}
+                      {syncResult.chamadas.fase4}).
+                    </p>
                   )}
                 </div>
               )}
