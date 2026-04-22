@@ -106,10 +106,12 @@ serve(async (req) => {
       { preco: number; imgId: string; nome: string }
     >();
     for (const item of items) {
-      const p = item?.listaPreco?.produto;
-      if (!p?.codExterno) continue;
-      clicMap.set(String(p.codExterno).trim(), {
-        preco: Number(item.listaPreco.preco) || 0,
+      const p = item?.produto;
+      if (!p) continue;
+      const codigo = p.codExterno ?? p.codigo ?? p.codInterno ?? p.id;
+      if (codigo === undefined || codigo === null || codigo === "") continue;
+      clicMap.set(String(codigo).trim(), {
+        preco: Number(item.preco) || 0,
         imgId: String(p.imgProduto || "").trim(),
         nome: String(p.nome || ""),
       });
@@ -199,6 +201,7 @@ serve(async (req) => {
       erros,
       amostra_codigos_clicvendas: amostraClic,
       amostra_codigos_sistema: amostraSistema,
+      debug_produto: items[0]?.produto ?? null,
     });
   } catch (err) {
     return jsonResponse(
