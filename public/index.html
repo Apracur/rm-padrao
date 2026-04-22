@@ -2,7 +2,8 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e40af" />
     <title>RM - Requisição de Material - Ello Atacadão</title>
 
     <!-- Tailwind CSS -->
@@ -51,6 +52,31 @@
 
       .currency-input {
         text-align: right;
+      }
+
+      html, body {
+        -webkit-text-size-adjust: 100%;
+        overflow-x: hidden;
+      }
+
+      /* Evita zoom automático no iOS quando o input recebe foco */
+      @media (max-width: 640px) {
+        input, select, textarea {
+          font-size: 16px !important;
+        }
+      }
+
+      /* Permite scroll suave em containers de tabela no mobile */
+      .overflow-x-auto {
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* Garante que o app respeite as áreas seguras do iPhone */
+      @supports (padding: max(0px)) {
+        body {
+          padding-left: env(safe-area-inset-left);
+          padding-right: env(safe-area-inset-right);
+        }
       }
     </style>
   </head>
@@ -177,6 +203,16 @@
         <SvgIcon size={size} className={className}>
           <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
           <line x1="7" y1="7" x2="7.01" y2="7" />
+        </SvgIcon>
+      );
+
+      const LucideTrash2 = ({ size = 20, className = "" }) => (
+        <SvgIcon size={size} className={className}>
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+          <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
         </SvgIcon>
       );
 
@@ -1518,7 +1554,7 @@
             </div>
           )}
 
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">
               Nova Requisição
             </h2>
 
@@ -1657,8 +1693,8 @@
                 </div>
               </div>
 
-              {/* Products Table */}
-              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              {/* Products Table - Desktop */}
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden hidden md:block">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
@@ -1779,6 +1815,110 @@
                 )}
               </div>
 
+              {/* Products List - Mobile */}
+              <div className="md:hidden space-y-3">
+                {filteredProdutos.map((produto) => {
+                  const qty = cartItems[produto.id] || 0;
+                  const qtdEstoque = estoque[produto.id] || 0;
+                  const subtotal = produto.preco_unitario * qty;
+                  return (
+                    <div
+                      key={produto.id}
+                      className={`bg-white rounded-lg border ${qty > 0 ? "border-blue-300 ring-1 ring-blue-200" : "border-gray-200"} p-3`}
+                    >
+                      <div className="flex gap-3">
+                        {produto.imagem_url ? (
+                          <img
+                            src={produto.imagem_url}
+                            alt={produto.nome}
+                            className="w-14 h-14 object-cover rounded border border-gray-200 flex-shrink-0"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 bg-gray-50 rounded border border-gray-200 flex items-center justify-center text-gray-400 flex-shrink-0">
+                            <LucideImage size={22} />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 text-sm leading-tight break-words">
+                            {produto.nome}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {getCodigoInterno(produto.nome)}
+                            {produto.marca ? ` • ${produto.marca}` : ""}
+                            {produto.unidade ? ` • ${produto.unidade}` : ""}
+                          </p>
+                          <div className="flex items-center justify-between mt-1.5 gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-gray-800">
+                              {formatCurrency(produto.preco_unitario)}
+                            </span>
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                                qtdEstoque === 0
+                                  ? "bg-red-100 text-red-800"
+                                  : qtdEstoque < 10
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-green-100 text-green-800"
+                              }`}
+                            >
+                              Estoque: {qtdEstoque}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 gap-3">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuantityChange(produto.id, Math.max(0, qty - 1))
+                            }
+                            className="w-9 h-9 rounded-md border border-gray-300 bg-white text-gray-700 font-bold text-lg leading-none flex items-center justify-center active:bg-gray-100"
+                            aria-label="Diminuir"
+                          >
+                            −
+                          </button>
+                          <input
+                            type="number"
+                            min="0"
+                            value={qty}
+                            onChange={(e) =>
+                              handleQuantityChange(produto.id, e.target.value)
+                            }
+                            className="w-16 h-9 px-2 border border-gray-300 rounded text-center focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuantityChange(produto.id, qty + 1)
+                            }
+                            className="w-9 h-9 rounded-md border border-gray-300 bg-white text-gray-700 font-bold text-lg leading-none flex items-center justify-center active:bg-gray-100"
+                            aria-label="Aumentar"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-500">Subtotal</p>
+                          <p className="font-semibold text-gray-900 text-sm">
+                            {formatCurrency(subtotal)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredProdutos.length === 0 && (
+                  <div className="bg-white rounded-lg border border-gray-200 text-center py-10">
+                    <LucidePackage
+                      size={40}
+                      className="mx-auto text-gray-300 mb-3"
+                    />
+                    <p className="text-gray-500 text-sm">Nenhum produto encontrado</p>
+                  </div>
+                )}
+              </div>
+
               {/* Submit Button */}
               <div className="flex gap-4">
                 <button
@@ -1823,19 +1963,18 @@
             setLoading(true);
             let query = supabase
               .from("pedidos")
-              .select("*, locais(nome), perfis:usuario_id(nome, email)")
+              .select("*, locais(nome)")
               .order("created_at", { ascending: false });
 
             if (userRole !== "admin") {
               const {
                 data: { user: authUser },
               } = await supabase.auth.getUser();
-              const { data: perfil, error: perfilError } = await supabase
+              const { data: perfil } = await supabase
                 .from("perfis")
                 .select("local_id")
-                .eq("id", authUser.id)
-                .single();
-              if (perfilError) throw perfilError;
+                .eq("email", authUser.email)
+                .maybeSingle();
               if (perfil?.local_id) {
                 query = query.eq("local_id", perfil.local_id);
               } else {
@@ -1845,7 +1984,27 @@
 
             const { data, error } = await query;
             if (error) throw error;
-            setPedidos(data || []);
+
+            const pedidosData = data || [];
+            const userIds = [
+              ...new Set(pedidosData.map((p) => p.usuario_id).filter(Boolean)),
+            ];
+            let perfisById = {};
+            if (userIds.length > 0) {
+              const { data: perfisData } = await supabase
+                .from("perfis")
+                .select("id, nome, email")
+                .in("id", userIds);
+              (perfisData || []).forEach((p) => {
+                perfisById[p.id] = p;
+              });
+            }
+            setPedidos(
+              pedidosData.map((p) => ({
+                ...p,
+                perfis: perfisById[p.usuario_id] || null,
+              })),
+            );
           } catch (err) {
             console.error("Error fetching pedidos:", err);
           } finally {
@@ -1878,6 +2037,32 @@
             if (!itensPedido[pedidoId]) {
               fetchItensPedido(pedidoId);
             }
+          }
+        };
+
+        const handleDeletePedido = async (pedido) => {
+          const confirmMsg =
+            `Excluir o pedido ${pedido.numero_pedido}?\n\n` +
+            `Local: ${pedido.locais?.nome || "-"}\n` +
+            `Valor: ${formatCurrency(pedido.valor_total)}\n\n` +
+            `Esta ação é irreversível e removerá também todos os itens do pedido.`;
+          if (!window.confirm(confirmMsg)) return;
+          try {
+            const { error } = await supabase
+              .from("pedidos")
+              .delete()
+              .eq("id", pedido.id);
+            if (error) throw error;
+            setPedidos((prev) => prev.filter((p) => p.id !== pedido.id));
+            setItensPedido((prev) => {
+              const updated = { ...prev };
+              delete updated[pedido.id];
+              return updated;
+            });
+            if (expandedId === pedido.id) setExpandedId(null);
+          } catch (err) {
+            console.error("Error deleting pedido:", err);
+            alert("Erro ao excluir pedido: " + err.message);
           }
         };
 
@@ -1949,7 +2134,7 @@
 
         return (
           <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">
               Meus Pedidos
             </h2>
 
@@ -1970,16 +2155,19 @@
                   >
                     <button
                       onClick={() => handleExpandClick(pedido.id)}
-                      className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition"
+                      className="w-full px-4 sm:px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition gap-2"
                     >
                       <div className="flex items-center gap-3 sm:gap-6 flex-1 text-left min-w-0">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-gray-900 text-sm sm:text-base">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-gray-900 text-sm sm:text-base truncate">
                             {pedido.numero_pedido}
                           </p>
                           <p className="text-xs sm:text-sm text-gray-600 mt-1">
                             {formatDate(pedido.created_at)} •{" "}
                             {getMonthName(pedido.mes_referencia)}
+                          </p>
+                          <p className="text-sm font-bold text-gray-900 mt-1 sm:hidden">
+                            {formatCurrency(pedido.valor_total)}
                           </p>
                           {pedido.perfis && (
                             <p className="text-xs text-gray-500 mt-0.5 truncate">
@@ -1997,21 +2185,21 @@
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+                      <div className="flex items-center gap-1 sm:gap-4 flex-shrink-0">
                         <span
-                          className={`px-2 sm:px-4 py-1 sm:py-2 rounded-full text-xs sm:text-sm font-medium border ${getStatusColor(pedido.status)}`}
+                          className={`px-2 sm:px-4 py-1 sm:py-2 rounded-full text-[10px] sm:text-sm font-medium border ${getStatusColor(pedido.status)}`}
                         >
                           {getStatusLabel(pedido.status)}
                         </span>
                         <LucideChevronDown
-                          size={24}
-                          className={`text-gray-400 transition ${expandedId === pedido.id ? "rotate-180" : ""}`}
+                          size={20}
+                          className={`text-gray-400 transition flex-shrink-0 ${expandedId === pedido.id ? "rotate-180" : ""}`}
                         />
                       </div>
                     </button>
 
                     {expandedId === pedido.id && (
-                      <div className="border-t border-gray-200 px-6 py-4 bg-gray-50">
+                      <div className="border-t border-gray-200 px-4 sm:px-6 py-4 bg-gray-50">
                         {/* Order Details */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                           <div>
@@ -2040,21 +2228,21 @@
                               {itensPedido[pedido.id].map((item) => (
                                 <div
                                   key={item.id}
-                                  className="flex items-center justify-between bg-white p-3 rounded border border-gray-200"
+                                  className="flex items-center justify-between bg-white p-3 rounded border border-gray-200 gap-3"
                                 >
-                                  <div>
-                                    <p className="font-medium text-gray-900">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-gray-900 text-sm sm:text-base break-words">
                                       {item.produtos.nome}
                                     </p>
-                                    <p className="text-sm text-gray-600">
+                                    <p className="text-xs sm:text-sm text-gray-600">
                                       {getCodigoInterno(item.produtos.nome)}
                                     </p>
                                   </div>
-                                  <div className="text-right">
-                                    <p className="font-medium text-gray-900">
+                                  <div className="text-right flex-shrink-0">
+                                    <p className="font-medium text-gray-900 text-sm sm:text-base">
                                       {item.quantidade} un.
                                     </p>
-                                    <p className="text-sm text-gray-600">
+                                    <p className="text-xs sm:text-sm text-gray-600">
                                       {formatCurrency(item.preco_total)}
                                     </p>
                                   </div>
@@ -2149,6 +2337,15 @@
                                   {getStatusLabel(status)}
                                 </button>
                               ))}
+                            </div>
+                            <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end">
+                              <button
+                                onClick={() => handleDeletePedido(pedido)}
+                                className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                              >
+                                <LucideTrash2 size={16} />
+                                Excluir Pedido
+                              </button>
                             </div>
                           </div>
                         )}
@@ -2700,20 +2897,20 @@
 
             {/* Import Preview Modal */}
             {importPreview && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-                  <div className="p-6 border-b border-gray-200">
-                    <h3 className="text-xl font-bold text-gray-800">
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+                <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] sm:max-h-[80vh] flex flex-col">
+                  <div className="p-4 sm:p-6 border-b border-gray-200">
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-800">
                       Confirmar Importação
                     </h3>
-                    <p className="text-sm text-gray-600 mt-1">
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">
                       {importPreview.updates.length} item(ns) serão atualizados
                       {importPreview.skipped.length > 0 &&
                         ` • ${importPreview.skipped.length} linha(s) ignorada(s)`}
                     </p>
                   </div>
-                  <div className="overflow-y-auto flex-1 p-6">
-                    <table className="w-full text-sm">
+                  <div className="overflow-y-auto flex-1 p-4 sm:p-6 overflow-x-auto">
+                    <table className="w-full text-sm min-w-[500px]">
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-3 py-2 text-left font-semibold text-gray-700">
@@ -2886,8 +3083,8 @@
               )}
             </div>
 
-            {/* Table */}
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            {/* Table - Desktop */}
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden hidden md:block">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
@@ -3018,10 +3215,105 @@
               )}
             </div>
 
+            {/* Cards - Mobile */}
+            <div className="md:hidden space-y-3 pb-32">
+              {filteredProdutos.map((produto) => (
+                <div
+                  key={produto.id}
+                  className="bg-white rounded-lg border border-gray-200 p-3"
+                >
+                  <div className="flex gap-3">
+                    <div className="flex-shrink-0">
+                      <ImageUploadCell
+                        produto={produto}
+                        onUploadComplete={(id, url) =>
+                          setProdutos((prev) =>
+                            prev.map((p) =>
+                              p.id === id ? { ...p, imagem_url: url } : p
+                            )
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 text-sm leading-tight break-words">
+                        {produto.nome}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5 font-mono">
+                        {getCodigoInterno(produto.nome)}
+                        {produto.marca ? ` • ${produto.marca}` : ""}
+                        {produto.unidade ? ` • ${produto.unidade}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                    {visibleLocais.map((local) => {
+                      const estoqueItem = getEstoqueItem(produto.id, local.id);
+                      const key = changeKey(produto.id, local.id);
+                      const qty = getCurrentQty(produto.id, local.id);
+                      const minQty = estoqueItem?.quantidade_minima ?? 0;
+                      const isDirty = changes[key] !== undefined;
+
+                      let badgeColor = "bg-green-100 text-green-800";
+                      if (qty === 0) badgeColor = "bg-red-100 text-red-800";
+                      else if (qty < minQty)
+                        badgeColor = "bg-amber-100 text-amber-800";
+
+                      return (
+                        <div
+                          key={local.id}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <span className="text-xs text-gray-700 font-medium truncate flex-1">
+                            {local.nome}
+                          </span>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => handleStep(produto, local, -1)}
+                              className="w-8 h-8 rounded-md border border-gray-300 bg-white text-gray-600 font-bold text-lg leading-none flex items-center justify-center active:bg-gray-100"
+                              aria-label="Diminuir"
+                            >
+                              −
+                            </button>
+                            <input
+                              type="number"
+                              min="0"
+                              value={qty}
+                              onChange={(e) =>
+                                handleQtyChange(produto, local, e.target.value)
+                              }
+                              className={`w-16 h-8 px-1 border-2 rounded text-center font-semibold text-sm outline-none focus:ring-2 focus:ring-blue-500 transition ${isDirty ? "border-blue-400 bg-blue-50" : `border-transparent ${badgeColor}`}`}
+                            />
+                            <button
+                              onClick={() => handleStep(produto, local, 1)}
+                              className="w-8 h-8 rounded-md border border-gray-300 bg-white text-gray-600 font-bold text-lg leading-none flex items-center justify-center active:bg-gray-100"
+                              aria-label="Aumentar"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {filteredProdutos.length === 0 && (
+                <div className="bg-white rounded-lg border border-gray-200 text-center py-10">
+                  <LucidePackage
+                    size={40}
+                    className="mx-auto text-gray-300 mb-3"
+                  />
+                  <p className="text-gray-500 text-sm">Nenhum produto encontrado</p>
+                </div>
+              )}
+            </div>
+
             {/* Sticky save bar */}
             {pendingCount > 0 && (
-              <div className="fixed bottom-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 bg-white border border-gray-200 shadow-2xl rounded-xl px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3 sm:gap-4 z-40">
-                <div className="text-sm text-gray-700">
+              <div className="fixed bottom-3 left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 bg-white border border-gray-200 shadow-2xl rounded-xl px-3 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center justify-between sm:justify-start gap-2 sm:gap-4 z-40">
+                <div className="text-xs sm:text-sm text-gray-700 w-full sm:w-auto">
                   <span className="font-bold text-blue-800">
                     {pendingCount}
                   </span>{" "}
@@ -3032,14 +3324,14 @@
                     setChanges({});
                     fetchData();
                   }}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition text-sm"
+                  className="flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition text-sm"
                 >
                   Descartar
                 </button>
                 <button
                   onClick={handleSaveChanges}
                   disabled={saving}
-                  className="px-5 py-2 rounded-lg bg-blue-800 text-white font-semibold hover:bg-blue-900 disabled:bg-gray-400 transition flex items-center gap-2 text-sm"
+                  className="flex-1 sm:flex-none px-3 sm:px-5 py-2 rounded-lg bg-blue-800 text-white font-semibold hover:bg-blue-900 disabled:bg-gray-400 transition flex items-center justify-center gap-2 text-sm"
                 >
                   {saving ? (
                     <>
@@ -3049,7 +3341,7 @@
                   ) : (
                     <>
                       <LucideSave size={16} />
-                      Salvar Alterações
+                      Salvar
                     </>
                   )}
                 </button>
@@ -3087,6 +3379,36 @@
         const [savingUsuario, setSavingUsuario] = useState(false);
         const [editingUserLocal, setEditingUserLocal] = useState(null); // Stores user.id being edited
         const [selectedLocalForUser, setSelectedLocalForUser] = useState(""); // Stores the new local_id for a user
+
+        const [syncing, setSyncing] = useState(false);
+        const [syncResult, setSyncResult] = useState(null);
+        const [syncError, setSyncError] = useState("");
+
+        const handleSyncClicVendas = async () => {
+          if (
+            !window.confirm(
+              "Buscar preços e imagens atualizadas no ClicVendas? Produtos sem código correspondente serão ignorados.",
+            )
+          )
+            return;
+
+          setSyncing(true);
+          setSyncError("");
+          setSyncResult(null);
+          try {
+            const { data, error } = await supabase.functions.invoke(
+              "sync-clicvendas",
+              { body: {} },
+            );
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+            setSyncResult(data);
+          } catch (err) {
+            setSyncError(err.message || "Erro ao sincronizar");
+          } finally {
+            setSyncing(false);
+          }
+        };
 
         useEffect(() => {
           fetchData();
@@ -3332,15 +3654,146 @@
               Configurações
             </h2>
 
+            {/* ClicVendas Sync Section */}
+            <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-lg sm:text-xl font-semibold text-gray-800">
+                    Integração ClicVendas
+                  </h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Atualiza preço e imagem dos produtos do sistema com base
+                    na tabela de preço do portal ClicVendas. Produtos sem
+                    correspondência (por código) são ignorados.
+                  </p>
+                </div>
+                <button
+                  onClick={handleSyncClicVendas}
+                  disabled={syncing}
+                  className="flex items-center justify-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 disabled:bg-gray-400 transition text-sm font-medium self-start sm:self-auto whitespace-nowrap"
+                >
+                  {syncing ? "Sincronizando..." : "Sincronizar agora"}
+                </button>
+              </div>
+
+              {syncError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                  <span className="text-red-600 text-xl">⚠️</span>
+                  <p className="text-red-700 text-sm">{syncError}</p>
+                </div>
+              )}
+
+              {syncResult && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="text-xs text-blue-700">No ClicVendas</div>
+                      <div className="text-xl font-bold text-blue-900">
+                        {syncResult.total_clic}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                      <div className="text-xs text-gray-700">No sistema</div>
+                      <div className="text-xl font-bold text-gray-900">
+                        {syncResult.total_sistema}
+                      </div>
+                    </div>
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <div className="text-xs text-green-700">Atualizados</div>
+                      <div className="text-xl font-bold text-green-800">
+                        {syncResult.atualizados}
+                      </div>
+                    </div>
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                      <div className="text-xs text-yellow-700">
+                        Sem correspondência
+                      </div>
+                      <div className="text-xl font-bold text-yellow-800">
+                        {syncResult.nao_encontrados}
+                      </div>
+                    </div>
+                  </div>
+
+                  {syncResult.alertas_preco?.length > 0 && (
+                    <div className="bg-orange-50 border border-orange-300 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-orange-600 text-xl">⚠️</span>
+                        <h4 className="font-semibold text-orange-900">
+                          {syncResult.alertas_preco.length} produto(s) com
+                          preço no sistema MENOR que no ClicVendas
+                        </h4>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-orange-900 border-b border-orange-200">
+                              <th className="py-2 pr-3">Código</th>
+                              <th className="py-2 pr-3">Produto</th>
+                              <th className="py-2 pr-3 text-right">
+                                Sistema
+                              </th>
+                              <th className="py-2 pr-3 text-right">
+                                ClicVendas
+                              </th>
+                              <th className="py-2 pr-3 text-right">
+                                Diferença
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {syncResult.alertas_preco.map((a) => (
+                              <tr
+                                key={a.id}
+                                className="border-b border-orange-100"
+                              >
+                                <td className="py-2 pr-3 font-mono text-xs">
+                                  {a.codigo}
+                                </td>
+                                <td className="py-2 pr-3">{a.nome}</td>
+                                <td className="py-2 pr-3 text-right">
+                                  R$ {a.preco_sistema.toFixed(2)}
+                                </td>
+                                <td className="py-2 pr-3 text-right font-semibold">
+                                  R$ {a.preco_clic.toFixed(2)}
+                                </td>
+                                <td className="py-2 pr-3 text-right text-orange-700 font-semibold">
+                                  +R$ {a.diferenca.toFixed(2)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {syncResult.erros?.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <h4 className="font-semibold text-red-900 mb-2">
+                        {syncResult.erros.length} erro(s) durante atualização
+                      </h4>
+                      <ul className="text-sm text-red-800 list-disc list-inside space-y-1">
+                        {syncResult.erros.slice(0, 10).map((e, i) => (
+                          <li key={i}>
+                            {e.nome}: {e.error}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Users Section */}
-            <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-semibold text-gray-800">
+            <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <h3 className="text-lg sm:text-xl font-semibold text-gray-800">
                   Usuários
                 </h3>
                 <button
                   onClick={() => setShowNovoUsuario(!showNovoUsuario)}
-                  className="flex items-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition text-sm font-medium"
+                  className="flex items-center justify-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition text-sm font-medium self-start sm:self-auto"
                 >
                   <LucideUserPlus size={16} />
                   Novo Usuário
@@ -3486,26 +3939,26 @@
                 {usuarios.map((usuario) => (
                   <div
                     key={usuario.id}
-                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200"
                   >
-                    <div>
-                      <p className="font-medium text-gray-900">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 break-words">
                         {usuario.nome}
                       </p>
-                      <p className="text-sm text-gray-600">{usuario.email}</p>
+                      <p className="text-sm text-gray-600 break-all">{usuario.email}</p>
                       <p className="text-xs text-gray-500">
                         Local: {usuario.locais?.nome || "Nenhum"}
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {editingUserLocal === usuario.id ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                           <select
                             value={selectedLocalForUser}
                             onChange={(e) =>
                               setSelectedLocalForUser(e.target.value)
                             }
-                            className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                            className="flex-1 sm:flex-none px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                           >
                             <option value="">Selecione</option>
                             {locais.map((local) => (
@@ -3578,12 +4031,12 @@
             </div>
 
             {/* Locais Section */}
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-semibold text-gray-800">Locais</h3>
+            <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <h3 className="text-lg sm:text-xl font-semibold text-gray-800">Locais</h3>
                 <button
                   onClick={() => setShowNovoLocal(!showNovoLocal)}
-                  className="flex items-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition text-sm font-medium"
+                  className="flex items-center justify-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition text-sm font-medium self-start sm:self-auto"
                 >
                   <LucidePlus size={16} />
                   Novo Local
@@ -3704,11 +4157,11 @@
                 {locais.map((local) => (
                   <div
                     key={local.id}
-                    className="p-4 bg-gray-50 rounded-lg border border-gray-200"
+                    className="p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200"
                   >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium text-gray-900">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 break-words">
                           {local.nome}
                         </p>
                         <p className="text-sm text-gray-600">
@@ -3718,9 +4171,9 @@
                           CC: {local.centro_custo}
                         </p>
                       </div>
-                      <div className="text-right">
+                      <div className="sm:text-right">
                         {editingOrcamento === local.id ? (
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm text-gray-600">R$</span>
                             <input
                               type="number"
@@ -3728,7 +4181,7 @@
                               step="0.01"
                               value={novoOrcamento}
                               onChange={(e) => setNovoOrcamento(e.target.value)}
-                              className="w-32 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                              className="flex-1 sm:flex-none w-32 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
                               placeholder="0.00"
                               autoFocus
                             />
@@ -3750,7 +4203,7 @@
                             </button>
                           </div>
                         ) : (
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <div>
                               <p className="text-sm text-gray-600">
                                 Orçamento mensal
@@ -4003,7 +4456,7 @@
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm hidden md:block">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-gray-50 text-gray-700 font-semibold border-b">
@@ -4015,6 +4468,7 @@
                       <th className="px-4 py-3">Marca</th>
                       <th className="px-4 py-3 text-center">Un.</th>
                       <th className="px-4 py-3 text-right">Preço Unit.</th>
+                      <th className="px-4 py-3 text-right">Preço ClicVendas</th>
                       <th className="px-4 py-3 text-center">Status</th>
                       <th className="px-4 py-3 text-center min-w-[210px]">Ações</th>
                     </tr>
@@ -4022,7 +4476,7 @@
                   <tbody className="divide-y divide-gray-100">
                     {filtered.length === 0 ? (
                       <tr>
-                        <td colSpan="9" className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan="10" className="px-4 py-8 text-center text-gray-500">
                           Nenhum produto encontrado.
                         </td>
                       </tr>
@@ -4046,7 +4500,24 @@
                           <td className="px-4 py-3 font-medium text-gray-900 align-middle">{p.nome}</td>
                           <td className="px-4 py-3 text-gray-600 align-middle">{p.marca || '-'}</td>
                           <td className="px-4 py-3 text-center align-middle text-gray-600">{p.unidade}</td>
-                          <td className="px-4 py-3 text-right text-gray-800 align-middle font-medium whitespace-nowrap">{formatCurrency(p.preco_unitario)}</td>
+                          <td className={`px-4 py-3 text-right align-middle font-medium whitespace-nowrap ${
+                            Number(p.preco_clic) > 0 && Number(p.preco_unitario) > 0 && Number(p.preco_unitario) < Number(p.preco_clic)
+                              ? "text-orange-700 bg-orange-50"
+                              : "text-gray-800"
+                          }`}
+                          title={
+                            Number(p.preco_clic) > 0 && Number(p.preco_unitario) > 0 && Number(p.preco_unitario) < Number(p.preco_clic)
+                              ? `Preço do sistema abaixo do ClicVendas em R$ ${(Number(p.preco_clic) - Number(p.preco_unitario)).toFixed(2)}`
+                              : ""
+                          }>
+                            {Number(p.preco_clic) > 0 && Number(p.preco_unitario) > 0 && Number(p.preco_unitario) < Number(p.preco_clic) && (
+                              <span className="mr-1">⚠️</span>
+                            )}
+                            {formatCurrency(p.preco_unitario)}
+                          </td>
+                          <td className="px-4 py-3 text-right align-middle text-gray-600 whitespace-nowrap">
+                            {Number(p.preco_clic) > 0 ? formatCurrency(p.preco_clic) : '-'}
+                          </td>
                           <td className="px-4 py-3 text-center align-middle">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${p.ativo !== false ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
                               {p.ativo !== false ? 'Ativo' : 'Inativo'}
@@ -4087,11 +4558,108 @@
               </div>
             </div>
 
+            {/* Cards - Mobile */}
+            <div className="md:hidden space-y-3">
+              {filtered.length === 0 ? (
+                <div className="bg-white rounded-lg border border-gray-200 text-center py-10">
+                  <p className="text-gray-500 text-sm">Nenhum produto encontrado.</p>
+                </div>
+              ) : (
+                filtered.map((p) => (
+                  <div
+                    key={p.id}
+                    className="bg-white rounded-lg border border-gray-200 p-3 shadow-sm"
+                  >
+                    <div className="flex gap-3">
+                      <div className="flex-shrink-0">
+                        <ImageUploadCell
+                          produto={p}
+                          onUploadComplete={(id, url) =>
+                            setProdutos((prev) =>
+                              prev.map((item) =>
+                                item.id === id ? { ...item, imagem_url: url } : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-medium text-gray-900 text-sm leading-tight break-words flex-1 min-w-0">
+                            {p.nome}
+                          </p>
+                          <span
+                            className={`flex-shrink-0 inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full ${p.ativo !== false ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+                          >
+                            {p.ativo !== false ? "Ativo" : "Inativo"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 font-mono mt-0.5 break-words">
+                          {getCodigoInterno(p.nome)}
+                          {p.codigo_fornecedor ? ` • ${p.codigo_fornecedor}` : ""}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {p.marca || "-"} • {p.unidade}
+                        </p>
+                        <div className="mt-1">
+                          <p
+                            className={`text-sm font-semibold ${
+                              Number(p.preco_clic) > 0 &&
+                              Number(p.preco_unitario) > 0 &&
+                              Number(p.preco_unitario) < Number(p.preco_clic)
+                                ? "text-orange-700"
+                                : "text-gray-800"
+                            }`}
+                          >
+                            {Number(p.preco_clic) > 0 &&
+                              Number(p.preco_unitario) > 0 &&
+                              Number(p.preco_unitario) < Number(p.preco_clic) && (
+                                <span className="mr-1">⚠️</span>
+                              )}
+                            {formatCurrency(p.preco_unitario)}
+                          </p>
+                          {Number(p.preco_clic) > 0 && (
+                            <p className="text-[11px] text-gray-500">
+                              ClicVendas: {formatCurrency(p.preco_clic)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100">
+                      <button
+                        onClick={() => openEditar(p)}
+                        className="flex-1 px-2 py-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleToggleAtivo(p)}
+                        className={`flex-1 px-2 py-1.5 text-xs border rounded transition ${
+                          p.ativo !== false
+                            ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                            : "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                        }`}
+                      >
+                        {p.ativo !== false ? "Inativar" : "Reativar"}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(p)}
+                        className="flex-1 px-2 py-1.5 text-xs bg-red-50 text-red-700 border border-red-200 rounded hover:bg-red-100 transition"
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
             {/* Modal */}
             {showModal && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-                  <h3 className="text-xl font-bold text-gray-900 mb-6">
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2 sm:p-4 z-50">
+                <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-4 sm:p-6 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4 sm:mb-6">
                     {editingId ? "Editar Produto" : "Criar Novo Produto"}
                   </h3>
 
@@ -4316,7 +4884,7 @@
               onClose={() => setSidebarOpen(false)}
             />
 
-            <main className="flex-1 overflow-y-auto">
+            <main className="flex-1 overflow-y-auto min-w-0">
               {/* Mobile top bar */}
               <div className="md:hidden sticky top-0 z-20 bg-blue-800 text-white px-4 py-3 flex items-center gap-3 shadow-md">
                 <button
