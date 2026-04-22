@@ -73,9 +73,13 @@ serve(async (req) => {
     }
 
     const basicAuth = btoa(`${clicUser}:${clicPass}`);
-    const clicRes = await fetch(
-      `${baseUrl}/clicVendas/rest/Listas/produtosPedido`,
-      {
+    const url = `${baseUrl}/clicVendas/rest/Listas/produtosPedido`;
+
+    // A API cap-a o retorno em 100 itens por chamada. Para trazer o
+    // catálogo completo, iteramos pelo campo "filtro" com cada letra/
+    // dígito possível e deduplicamos pelo código do produto.
+    const fetchFiltro = async (filtro: string) => {
+      const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json;charset=UTF-8",
@@ -83,34 +87,40 @@ serve(async (req) => {
           Authorization: `Basic ${basicAuth}`,
         },
         body: JSON.stringify({
-          filtro: "",
+          filtro,
           idCvTccnpj: cnpjId,
           idCvTolistapreco: Number(listaPrecoId),
         }),
-      },
-    );
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(
+          `ClicVendas ${res.status} em filtro="${filtro}": ${text.slice(0, 120)}`,
+        );
+      }
+      return (await res.json()) as any[];
+    };
 
-    if (!clicRes.ok) {
-      const text = await clicRes.text();
-      return jsonResponse(
-        { error: `ClicVendas respondeu ${clicRes.status}: ${text.slice(0, 200)}` },
-        502,
-      );
+    const filtros = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("");
+    const batches = await Promise.all(filtros.map((f) => fetchFiltro(f)));
+    const allItems = batches.flat();
+    const filtroStats: Record<string, number> = {};
+    for (let i = 0; i < filtros.length; i++) {
+      filtroStats[filtros[i]] = batches[i].length;
     }
 
-    const items = (await clicRes.json()) as any[];
-
-    // Constrói índice por codExterno.
     const clicMap = new Map<
       string,
       { preco: number; imgId: string; nome: string }
     >();
-    for (const item of items) {
+    for (const item of allItems) {
       const p = item?.produto;
       if (!p) continue;
       const codigo = p.codExterno ?? p.codigo ?? p.codInterno ?? p.id;
       if (codigo === undefined || codigo === null || codigo === "") continue;
-      clicMap.set(String(codigo).trim(), {
+      const key = String(codigo).trim();
+      if (clicMap.has(key)) continue;
+      clicMap.set(key, {
         preco: Number(item.preco) || 0,
         imgId: String(p.imgProduto || "").trim(),
         nome: String(p.nome || ""),
@@ -193,7 +203,8 @@ serve(async (req) => {
       .map((p) => ({ cod: String(p.codigo_interno), nome: p.nome }));
 
     return jsonResponse({
-      total_clic: items.length,
+      total_clic: clicMap.size,
+      total_clic_bruto: allItems.length,
       total_sistema: produtos?.length || 0,
       atualizados: updated,
       nao_encontrados: notFound,
@@ -201,7 +212,7 @@ serve(async (req) => {
       erros,
       amostra_codigos_clicvendas: amostraClic,
       amostra_codigos_sistema: amostraSistema,
-      debug_produto: items[0]?.produto ?? null,
+      filtros_stats: filtroStats,
     });
   } catch (err) {
     return jsonResponse(
