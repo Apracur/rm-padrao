@@ -1,7 +1,7 @@
 // Supabase Edge Function: sync-clicvendas
 // Busca produtos no portal ClicVendas via API REST e atualiza preco_clic
 // e imagem_url dos produtos correspondentes no Supabase (matching por
-// codigo_fornecedor == codExterno).
+// codigo_interno == codExterno).
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
@@ -115,13 +115,13 @@ serve(async (req) => {
       });
     }
 
-    // Busca produtos do Supabase que têm codigo_fornecedor.
+    // Busca produtos do Supabase que têm codigo_interno.
     const { data: produtos, error: prodErr } = await supabase
       .from("produtos")
       .select(
-        "id, codigo_fornecedor, nome, preco_unitario, preco_clic, imagem_url",
+        "id, codigo_interno, nome, preco_unitario, preco_clic, imagem_url",
       )
-      .not("codigo_fornecedor", "is", null);
+      .not("codigo_interno", "is", null);
     if (prodErr) throw prodErr;
 
     let updated = 0;
@@ -137,7 +137,11 @@ serve(async (req) => {
     const erros: Array<{ id: string; nome: string; error: string }> = [];
 
     for (const prod of produtos || []) {
-      const cod = String(prod.codigo_fornecedor).trim();
+      const cod = String(prod.codigo_interno).trim();
+      if (!cod || cod === "0") {
+        notFound++;
+        continue;
+      }
       const clic = clicMap.get(cod);
       if (!clic) {
         notFound++;
@@ -182,9 +186,9 @@ serve(async (req) => {
       .slice(0, 10)
       .map(([cod, v]) => ({ cod, nome: v.nome, preco: v.preco }));
     const amostraSistema = (produtos || [])
-      .filter((p) => p.codigo_fornecedor)
+      .filter((p) => p.codigo_interno)
       .slice(0, 10)
-      .map((p) => ({ cod: String(p.codigo_fornecedor), nome: p.nome }));
+      .map((p) => ({ cod: String(p.codigo_interno), nome: p.nome }));
 
     return jsonResponse({
       total_clic: items.length,
