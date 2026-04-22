@@ -1,0 +1,4 @@
+project_id = "vejkkbotkggviqjempop"
+
+[functions.sync-clicvendas]
+verify_jwt = false

@@ -3767,6 +3767,65 @@
                     </div>
                   )}
 
+                  {syncResult.atualizados === 0 &&
+                    syncResult.nao_encontrados > 0 &&
+                    (syncResult.amostra_codigos_clicvendas?.length > 0 ||
+                      syncResult.amostra_codigos_sistema?.length > 0) && (
+                      <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4">
+                        <h4 className="font-semibold text-yellow-900 mb-2">
+                          Diagnóstico: nenhum código bateu
+                        </h4>
+                        <p className="text-sm text-yellow-800 mb-3">
+                          Compare alguns códigos abaixo e veja se o formato é
+                          o mesmo (espaços, zeros à esquerda, etc).
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <div className="font-semibold text-yellow-900 mb-1">
+                              ClicVendas (codExterno)
+                            </div>
+                            <ul className="bg-white rounded border border-yellow-200 p-2 space-y-1 font-mono">
+                              {syncResult.amostra_codigos_clicvendas.map(
+                                (a, i) => (
+                                  <li key={i}>
+                                    <span className="text-blue-700">
+                                      {a.cod}
+                                    </span>{" "}
+                                    — {a.nome}
+                                  </li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-yellow-900 mb-1">
+                              Sistema (codigo_fornecedor)
+                            </div>
+                            <ul className="bg-white rounded border border-yellow-200 p-2 space-y-1 font-mono">
+                              {syncResult.amostra_codigos_sistema.length ===
+                              0 ? (
+                                <li className="text-red-700">
+                                  Nenhum produto do sistema tem
+                                  codigo_fornecedor preenchido!
+                                </li>
+                              ) : (
+                                syncResult.amostra_codigos_sistema.map(
+                                  (a, i) => (
+                                    <li key={i}>
+                                      <span className="text-blue-700">
+                                        {a.cod}
+                                      </span>{" "}
+                                      — {a.nome}
+                                    </li>
+                                  ),
+                                )
+                              )}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                   {syncResult.erros?.length > 0 && (
                     <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                       <h4 className="font-semibold text-red-900 mb-2">

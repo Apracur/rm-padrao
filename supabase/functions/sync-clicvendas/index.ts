@@ -25,21 +25,27 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     // Valida usuário autenticado e papel admin.
     const authHeader = req.headers.get("Authorization") || "";
-    if (!authHeader) return jsonResponse({ error: "Não autenticado" }, 401);
-
-    const supabaseAuth = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const {
-      data: { user },
-    } = await supabaseAuth.auth.getUser();
-    if (!user) return jsonResponse({ error: "Sessão inválida" }, 401);
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!token) return jsonResponse({ error: "Não autenticado" }, 401);
 
     const supabase = createClient(supabaseUrl, serviceKey);
+    const { data: userData, error: userErr } = await supabase.auth.getUser(
+      token,
+    );
+    if (userErr || !userData?.user) {
+      return jsonResponse(
+        {
+          error: "Sessão inválida",
+          detail: userErr?.message || "usuário não encontrado",
+        },
+        401,
+      );
+    }
+    const user = userData.user;
+
     const { data: perfil } = await supabase
       .from("perfis")
       .select("role")
@@ -171,6 +177,15 @@ serve(async (req) => {
       }
     }
 
+    // Amostras pra diagnosticar mismatch de códigos quando nada é atualizado.
+    const amostraClic = Array.from(clicMap.entries())
+      .slice(0, 10)
+      .map(([cod, v]) => ({ cod, nome: v.nome, preco: v.preco }));
+    const amostraSistema = (produtos || [])
+      .filter((p) => p.codigo_fornecedor)
+      .slice(0, 10)
+      .map((p) => ({ cod: String(p.codigo_fornecedor), nome: p.nome }));
+
     return jsonResponse({
       total_clic: items.length,
       total_sistema: produtos?.length || 0,
@@ -178,6 +193,8 @@ serve(async (req) => {
       nao_encontrados: notFound,
       alertas_preco: alertasPreco,
       erros,
+      amostra_codigos_clicvendas: amostraClic,
+      amostra_codigos_sistema: amostraSistema,
     });
   } catch (err) {
     return jsonResponse(
