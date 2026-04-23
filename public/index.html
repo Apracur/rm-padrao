@@ -1191,20 +1191,34 @@
 
       // Nova Requisição Component
       function NovaRequisicao({ user, userRole }) {
+        // ── Chave de rascunho isolada por usuário ──
+        const DRAFT_KEY = `rm_draft_${user?.id || "anon"}`;
+
+        // ── Restaura rascunho salvo no sessionStorage (se existir) ──
+        const loadDraft = () => {
+          try {
+            const raw = sessionStorage.getItem(DRAFT_KEY);
+            if (raw) return JSON.parse(raw);
+          } catch (_) {}
+          return null;
+        };
+        const savedDraft = loadDraft();
+
         const [produtos, setProdutos] = useState([]);
         const [estoque, setEstoque] = useState({});
-        const [cartItems, setCartItems] = useState({});
+        const [cartItems, setCartItems] = useState(savedDraft?.cartItems || {});
         const [searchTerm, setSearchTerm] = useState("");
         const [filterBrand, setFilterBrand] = useState("");
         const [loading, setLoading] = useState(true);
         const [loadError, setLoadError] = useState("");
-        const [mesReferencia, setMesReferencia] = useState("");
-        const [observacoes, setObservacoes] = useState("");
+        const [mesReferencia, setMesReferencia] = useState(savedDraft?.mesReferencia || "");
+        const [observacoes, setObservacoes] = useState(savedDraft?.observacoes || "");
         const [showSuccess, setShowSuccess] = useState(false);
         const [successMessage, setSuccessMessage] = useState("");
         const [lastPedido, setLastPedido] = useState(null);
         const [userLocalId, setUserLocalId] = useState(null);
         const [submitting, setSubmitting] = useState(false);
+        const [draftRestored, setDraftRestored] = useState(!!savedDraft && Object.keys(savedDraft?.cartItems || {}).length > 0);
 
         const [orcamento, setOrcamento] = useState(0);
         const [cliente, setCliente] = useState("");
@@ -1238,6 +1252,14 @@
           // recreates the user object reference (TOKEN_REFRESHED events).
           // eslint-disable-next-line react-hooks/exhaustive-deps
         }, [user?.id]);
+
+        // ── Salva rascunho automaticamente a cada alteração dos campos ──
+        useEffect(() => {
+          try {
+            const draft = { cartItems, mesReferencia, observacoes };
+            sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+          } catch (_) {}
+        }, [cartItems, mesReferencia, observacoes]);
 
         const loadData = async () => {
           setLoading(true);
@@ -1477,6 +1499,9 @@
             setCartItems({});
             setMesReferencia("");
             setObservacoes("");
+            setDraftRestored(false);
+            // ── Limpa o rascunho do navegador após envio bem-sucedido ──
+            try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {}
 
             setTimeout(() => setShowSuccess(false), 8000);
           } catch (err) {
@@ -1503,6 +1528,29 @@
                     </p>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Aviso de rascunho restaurado */}
+            {draftRestored && (
+              <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-blue-700 text-sm">
+                  <span>💾</span>
+                  <span>Rascunho restaurado — seus itens e campos foram recuperados do último preenchimento.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCartItems({});
+                    setMesReferencia("");
+                    setObservacoes("");
+                    setDraftRestored(false);
+                    try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {}
+                  }}
+                  className="text-xs text-blue-500 hover:text-blue-700 underline whitespace-nowrap flex-shrink-0"
+                >
+                  Limpar rascunho
+                </button>
               </div>
             )}
 
@@ -2977,14 +3025,19 @@
         const [syncing, setSyncing] = useState(false);
         const [syncResult, setSyncResult] = useState(null);
         const [syncError, setSyncError] = useState("");
+        const [produtosCatalogo, setProdutosCatalogo] = useState([]);
+        const [selectedProdutoId, setSelectedProdutoId] = useState("");
+        const [produtoSearchTerm, setProdutoSearchTerm] = useState("");
+
+        const selectedProduto = produtosCatalogo.find(
+          (p) => p.id === selectedProdutoId,
+        );
 
         const handleSyncClicVendas = async () => {
-          if (
-            !window.confirm(
-              "Buscar preços e imagens atualizadas no ClicVendas? Produtos sem código correspondente serão ignorados.",
-            )
-          )
-            return;
+          const confirmMsg = selectedProduto
+            ? `Sincronizar apenas o item "${selectedProduto.nome}" com o ClicVendas?`
+            : "Buscar preços e imagens atualizadas no ClicVendas para todos os itens ATIVOS? Itens inativos serão ignorados.";
+          if (!window.confirm(confirmMsg)) return;
 
           setSyncing(true);
           setSyncError("");
@@ -2992,7 +3045,9 @@
           try {
             const { data, error } = await supabase.functions.invoke(
               "sync-clicvendas",
-              { body: {} },
+              {
+                body: selectedProdutoId ? { produto_id: selectedProdutoId } : {},
+              },
             );
             if (error) throw error;
             if (data?.error) throw new Error(data.error);
@@ -3027,8 +3082,16 @@
 
             if (locaisError) throw locaisError;
 
+            const { data: produtosData, error: produtosError } = await supabase
+              .from("produtos")
+              .select("id, nome, codigo_interno, ativo")
+              .order("nome");
+
+            if (produtosError) throw produtosError;
+
             setUsuarios(usersData || []);
             setLocais(locaisData || []);
+            setProdutosCatalogo(produtosData || []);
           } catch (err) {
             console.error("Error fetching data:", err);
             alert(`Erro ao carregar dados: ${err.message}`);
@@ -3250,23 +3313,123 @@
 
             {/* ClicVendas Sync Section */}
             <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 mb-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                <div>
-                  <h3 className="text-lg sm:text-xl font-semibold text-gray-800">
-                    Integração ClicVendas
-                  </h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Atualiza preço e imagem dos produtos do sistema com base
-                    na tabela de preço do portal ClicVendas. Produtos sem
-                    correspondência (por código) são ignorados.
-                  </p>
-                </div>
+              <div className="mb-4">
+                <h3 className="text-lg sm:text-xl font-semibold text-gray-800">
+                  Integração ClicVendas
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Atualiza preço e imagem dos produtos do sistema com base
+                  na tabela de preço do portal ClicVendas. Itens inativos são
+                  ignorados na sincronização em lote. Produtos sem
+                  correspondência (por código) são ignorados.
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Sincronizar item específico (opcional)
+                </label>
+                {selectedProduto ? (
+                  <div className="flex items-center justify-between p-2 bg-blue-50 border border-blue-200 rounded gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {selectedProduto.nome}
+                        {!selectedProduto.ativo && (
+                          <span className="ml-2 inline-block px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 align-middle">
+                            Inativo
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        {getCodigoInterno(selectedProduto)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedProdutoId("");
+                        setProdutoSearchTerm("");
+                      }}
+                      className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded hover:bg-white"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <LucideSearch
+                        className="absolute left-3 top-2.5 text-gray-400"
+                        size={18}
+                      />
+                      <input
+                        type="text"
+                        value={produtoSearchTerm}
+                        onChange={(e) => setProdutoSearchTerm(e.target.value)}
+                        placeholder="Buscar por código ou descrição..."
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      />
+                    </div>
+                    {produtoSearchTerm.trim().length > 0 && (() => {
+                      const term = produtoSearchTerm.toLowerCase();
+                      const matches = produtosCatalogo
+                        .filter((p) =>
+                          String(p.nome || "").toLowerCase().includes(term) ||
+                          getCodigoInterno(p).toLowerCase().includes(term),
+                        )
+                        .slice(0, 30);
+                      if (matches.length === 0) {
+                        return (
+                          <p className="text-sm text-gray-500 text-center py-3">
+                            Nenhum produto encontrado
+                          </p>
+                        );
+                      }
+                      return (
+                        <div className="max-h-60 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded mt-2">
+                          {matches.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedProdutoId(p.id);
+                                setProdutoSearchTerm("");
+                              }}
+                              className="w-full text-left p-2 hover:bg-gray-50"
+                            >
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {p.nome}
+                                {!p.ativo && (
+                                  <span className="ml-2 inline-block px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 align-middle">
+                                    Inativo
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {getCodigoInterno(p)}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
+                <p className="text-xs text-gray-500 mt-2">
+                  Deixe vazio para sincronizar todos os itens ativos.
+                </p>
+              </div>
+
+              <div className="mb-4 flex justify-end">
                 <button
                   onClick={handleSyncClicVendas}
                   disabled={syncing}
-                  className="flex items-center justify-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 disabled:bg-gray-400 transition text-sm font-medium self-start sm:self-auto whitespace-nowrap"
+                  className="flex items-center justify-center gap-2 bg-blue-800 text-white px-4 py-2 rounded-lg hover:bg-blue-900 disabled:bg-gray-400 transition text-sm font-medium whitespace-nowrap"
                 >
-                  {syncing ? "Sincronizando..." : "Sincronizar agora"}
+                  {syncing
+                    ? "Sincronizando..."
+                    : selectedProduto
+                      ? "Sincronizar item selecionado"
+                      : "Sincronizar todos os ativos"}
                 </button>
               </div>
 
