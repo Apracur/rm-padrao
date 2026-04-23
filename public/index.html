@@ -308,9 +308,19 @@
         return "JPEG";
       };
 
+      const sortItensByNome = (itens) =>
+        [...(itens || [])].sort((a, b) =>
+          String(a?.produtos?.nome || "").localeCompare(
+            String(b?.produtos?.nome || ""),
+            "pt-BR",
+            { sensitivity: "base" },
+          ),
+        );
+
       const generateOrderPDF = async (pedido, itens, comImagem = false) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
+        itens = sortItensByNome(itens);
 
         // Header
         doc.setFontSize(22);
@@ -2474,7 +2484,7 @@
                           </h4>
                           {itensPedido[pedido.id] ? (
                             <div className="space-y-2">
-                              {itensPedido[pedido.id].map((item) => {
+                              {sortItensByNome(itensPedido[pedido.id]).map((item) => {
                                 const isEditing = editingId === pedido.id;
                                 const currentQty = isEditing
                                   ? (editQuantities[item.id] ?? item.quantidade)
@@ -2561,10 +2571,23 @@
                                 );
                               })}
                               {editingId === pedido.id &&
-                                Object.entries(addedItems).map(([produtoId, qty]) => {
-                                  const produto = produtosCatalogo.find(
-                                    (p) => p.id === produtoId,
-                                  );
+                                Object.entries(addedItems)
+                                  .map(([produtoId, qty]) => ({
+                                    produtoId,
+                                    qty,
+                                    produto: produtosCatalogo.find(
+                                      (p) => p.id === produtoId,
+                                    ),
+                                  }))
+                                  .filter((x) => x.produto)
+                                  .sort((a, b) =>
+                                    String(a.produto.nome || "").localeCompare(
+                                      String(b.produto.nome || ""),
+                                      "pt-BR",
+                                      { sensitivity: "base" },
+                                    ),
+                                  )
+                                  .map(({ produtoId, qty, produto }) => {
                                   if (!produto) return null;
                                   const subtotal = produto.preco_unitario * qty;
                                   return (
