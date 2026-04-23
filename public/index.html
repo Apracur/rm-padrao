@@ -259,17 +259,53 @@
 
       const getBase64Image = async (url) => {
         try {
-          const res = await fetch(url);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          const res = await fetch(url, { signal: controller.signal, cache: "no-cache" });
+          clearTimeout(timeoutId);
+          if (!res.ok) {
+            console.warn("Imagem não acessível para PDF:", url, res.status);
+            return null;
+          }
           const blob = await res.blob();
-          return new Promise((resolve) => {
+          if (!blob || !blob.type || !blob.type.startsWith("image/")) {
+            console.warn("URL não retornou imagem válida:", url, blob && blob.type);
+            return null;
+          }
+          const dataUrl = await new Promise((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result);
-            reader.readAsDataURL(blob);
+            reader.onerror = () => {
+              console.warn("FileReader falhou ao ler imagem:", url);
+              resolve(null);
+            };
+            reader.onabort = () => resolve(null);
+            try {
+              reader.readAsDataURL(blob);
+            } catch (e) {
+              console.warn("Exceção em readAsDataURL:", e);
+              resolve(null);
+            }
           });
+          if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {
+            return null;
+          }
+          return dataUrl;
         } catch (e) {
-          console.warn("Erro ao carregar imagem para o PDF:", e);
+          console.warn("Erro ao carregar imagem para o PDF:", url, e);
           return null;
         }
+      };
+
+      const detectImageFormat = (dataUrl) => {
+        if (typeof dataUrl !== "string") return "JPEG";
+        const m = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+)/);
+        if (!m) return "JPEG";
+        const sub = m[1].toLowerCase();
+        if (sub === "jpg" || sub === "jpeg") return "JPEG";
+        if (sub === "png") return "PNG";
+        if (sub === "webp") return "WEBP";
+        return "JPEG";
       };
 
       const generateOrderPDF = async (pedido, itens, comImagem = false) => {
@@ -332,11 +368,18 @@
 
         const imagesBase64 = {};
         if (comImagem) {
-          for (const item of itens) {
-            const url = item.produtos?.imagem_url;
-            if (url && !imagesBase64[url]) {
-              imagesBase64[url] = await getBase64Image(url);
-            }
+          const uniqueUrls = Array.from(
+            new Set(
+              itens
+                .map((it) => it.produtos?.imagem_url)
+                .filter((u) => typeof u === "string" && u.length > 0),
+            ),
+          );
+          const results = await Promise.all(
+            uniqueUrls.map(async (u) => [u, await getBase64Image(u)]),
+          );
+          for (const [u, data] of results) {
+            imagesBase64[u] = data;
           }
         }
 
@@ -375,13 +418,13 @@
               const itemRowIndex = data.row.index;
               const item = itens[itemRowIndex];
               const url = item?.produtos?.imagem_url;
-              if (url && imagesBase64[url]) {
+              const imgData = url ? imagesBase64[url] : null;
+              if (imgData && typeof imgData === "string" && imgData.startsWith("data:image/")) {
                 try {
-                  const imgData = imagesBase64[url];
-                  // If base64 contains the JPEG/PNG prefix, autotable accepts it natively
-                  doc.addImage(imgData, data.cell.x + 2, data.cell.y + 2, 16, 16);
+                  const fmt = detectImageFormat(imgData);
+                  doc.addImage(imgData, fmt, data.cell.x + 2, data.cell.y + 2, 16, 16);
                 } catch (e) {
-                  console.warn("Error drawing image in jsPDF", e);
+                  console.warn("Erro ao desenhar imagem no PDF", e);
                 }
               }
             }
@@ -3425,23 +3468,18 @@
             return;
           }
           const codigoInternoTrim = String(formData.codigo_interno || "").trim();
-          let codigoInternoNum = null;
+          let codigoInternoVal = null;
           if (codigoInternoTrim !== "") {
-            const parsed = parseInt(codigoInternoTrim, 10);
-            if (Number.isNaN(parsed) || parsed < 0) {
-              alert("O código interno deve ser um número inteiro não-negativo.");
-              return;
-            }
-            codigoInternoNum = parsed;
+            codigoInternoVal = codigoInternoTrim;
 
             const duplicado = produtos.find(p =>
               p.codigo_interno !== null &&
               p.codigo_interno !== undefined &&
-              Number(p.codigo_interno) === codigoInternoNum &&
+              String(p.codigo_interno).trim().toLowerCase() === codigoInternoVal.toLowerCase() &&
               p.id !== editingId
             );
             if (duplicado) {
-              alert(`O código interno ${codigoInternoNum} já está em uso pelo produto:\n\n"${duplicado.nome}"\n\nCada produto deve ter um código interno único.`);
+              alert(`O código interno ${codigoInternoVal} já está em uso pelo produto:\n\n"${duplicado.nome}"\n\nCada produto deve ter um código interno único.`);
               return;
             }
           }
@@ -3450,7 +3488,7 @@
           try {
             const payLoad = {
               nome: formData.nome,
-              codigo_interno: codigoInternoNum,
+              codigo_interno: codigoInternoVal,
               marca: formData.marca || null,
               unidade: formData.unidade || "UN",
               preco_unitario: parseFloat(formData.preco_unitario) || 0,
@@ -4406,12 +4444,10 @@
                           <span className="text-gray-400 font-normal ml-1">(usado nas integrações com ClicVendas e importações)</span>
                         </label>
                         <input
-                          type="number"
-                          min="0"
-                          step="1"
+                          type="text"
                           value={formData.codigo_interno}
                           onChange={e => setFormData({ ...formData, codigo_interno: e.target.value })}
-                          placeholder="Ex: 19153"
+                          placeholder="Ex: 19153 ou 50E5106"
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                         />
                       </div>
