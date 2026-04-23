@@ -2009,6 +2009,11 @@
         const [editQuantities, setEditQuantities] = useState({});
         const [editObservacoes, setEditObservacoes] = useState("");
         const [savingEdit, setSavingEdit] = useState(false);
+        const [produtosCatalogo, setProdutosCatalogo] = useState([]);
+        const [produtosLoaded, setProdutosLoaded] = useState(false);
+        const [loadingProdutos, setLoadingProdutos] = useState(false);
+        const [addedItems, setAddedItems] = useState({});
+        const [addSearchTerm, setAddSearchTerm] = useState("");
 
         useEffect(() => {
           if (user) {
@@ -2125,6 +2130,24 @@
           }
         };
 
+        const ensureProdutosLoaded = async () => {
+          if (produtosLoaded || loadingProdutos) return;
+          setLoadingProdutos(true);
+          try {
+            const { data, error } = await supabase
+              .from("produtos")
+              .select("*")
+              .eq("ativo", true);
+            if (error) throw error;
+            setProdutosCatalogo(data || []);
+            setProdutosLoaded(true);
+          } catch (err) {
+            console.warn("Não foi possível carregar catálogo:", err);
+          } finally {
+            setLoadingProdutos(false);
+          }
+        };
+
         const handleStartEdit = (pedido) => {
           const items = itensPedido[pedido.id] || [];
           const quantities = {};
@@ -2134,17 +2157,54 @@
           setEditingId(pedido.id);
           setEditQuantities(quantities);
           setEditObservacoes(pedido.observacoes || "");
+          setAddedItems({});
+          setAddSearchTerm("");
+          ensureProdutosLoaded();
         };
 
         const handleCancelEdit = () => {
           setEditingId(null);
           setEditQuantities({});
           setEditObservacoes("");
+          setAddedItems({});
+          setAddSearchTerm("");
         };
 
         const handleEditQtyChange = (itemId, value) => {
           const qty = Math.max(0, parseInt(value) || 0);
           setEditQuantities((prev) => ({ ...prev, [itemId]: qty }));
+        };
+
+        const handleAddProduto = (produto) => {
+          const existingItems = itensPedido[editingId] || [];
+          const alreadyInPedido = existingItems.find(
+            (it) => it.produto_id === produto.id,
+          );
+          if (alreadyInPedido) {
+            const currentQty =
+              editQuantities[alreadyInPedido.id] ?? alreadyInPedido.quantidade;
+            setEditQuantities((prev) => ({
+              ...prev,
+              [alreadyInPedido.id]: currentQty + 1,
+            }));
+            return;
+          }
+          setAddedItems((prev) => ({
+            ...prev,
+            [produto.id]: (prev[produto.id] || 0) + 1,
+          }));
+        };
+
+        const handleAddedQtyChange = (produtoId, value) => {
+          const qty = Math.max(0, parseInt(value) || 0);
+          setAddedItems((prev) => {
+            if (qty === 0) {
+              const updated = { ...prev };
+              delete updated[produtoId];
+              return updated;
+            }
+            return { ...prev, [produtoId]: qty };
+          });
         };
 
         const handleSaveEdit = async (pedido) => {
@@ -2166,7 +2226,24 @@
             }
           });
 
-          if (items.length > 0 && toDelete.length === items.length) {
+          const newItensRows = [];
+          Object.entries(addedItems).forEach(([produtoId, qty]) => {
+            if (qty <= 0) return;
+            const prod = produtosCatalogo.find((p) => p.id === produtoId);
+            if (!prod) return;
+            const preco_total = prod.preco_unitario * qty;
+            newValorTotal += preco_total;
+            newItensRows.push({
+              pedido_id: pedido.id,
+              produto_id: produtoId,
+              quantidade: qty,
+              preco_unitario: prod.preco_unitario,
+              preco_total,
+            });
+          });
+
+          const remainingExisting = items.length - toDelete.length;
+          if (remainingExisting + newItensRows.length === 0) {
             alert("O pedido precisa ter pelo menos um item. Para remover todos, exclua o pedido.");
             return;
           }
@@ -2189,6 +2266,18 @@
               if (error) throw error;
             }
 
+            let insertedItens = [];
+            if (newItensRows.length > 0) {
+              const { data, error } = await supabase
+                .from("itens_pedido")
+                .insert(newItensRows)
+                .select(
+                  "*, produtos(nome, codigo_interno, marca, unidade, imagem_url)",
+                );
+              if (error) throw error;
+              insertedItens = data || [];
+            }
+
             const { error: pedError } = await supabase
               .from("pedidos")
               .update({
@@ -2205,7 +2294,7 @@
                   : p,
               ),
             );
-            const updatedItens = items
+            const updatedExisting = items
               .filter((it) => !toDelete.includes(it.id))
               .map((it) => {
                 const newQty = editQuantities[it.id] ?? it.quantidade;
@@ -2213,7 +2302,10 @@
                   ? { ...it, quantidade: newQty, preco_total: it.preco_unitario * newQty }
                   : it;
               });
-            setItensPedido((prev) => ({ ...prev, [pedido.id]: updatedItens }));
+            setItensPedido((prev) => ({
+              ...prev,
+              [pedido.id]: [...updatedExisting, ...insertedItens],
+            }));
             handleCancelEdit();
           } catch (err) {
             console.error("Erro ao salvar edição:", err);
@@ -2468,6 +2560,87 @@
                                   </div>
                                 );
                               })}
+                              {editingId === pedido.id &&
+                                Object.entries(addedItems).map(([produtoId, qty]) => {
+                                  const produto = produtosCatalogo.find(
+                                    (p) => p.id === produtoId,
+                                  );
+                                  if (!produto) return null;
+                                  const subtotal = produto.preco_unitario * qty;
+                                  return (
+                                    <div
+                                      key={"new-" + produtoId}
+                                      className="flex items-center justify-between bg-green-50 p-3 rounded border border-green-200 gap-3"
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <p className="font-medium text-gray-900 text-sm sm:text-base break-words">
+                                          {produto.nome}
+                                          <span className="ml-2 inline-block px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-200 text-green-800 align-middle">
+                                            Novo
+                                          </span>
+                                        </p>
+                                        <p className="text-xs sm:text-sm text-gray-600">
+                                          {getCodigoInterno(produto)} •{" "}
+                                          {formatCurrency(produto.preco_unitario)} •{" "}
+                                          Subtotal: {formatCurrency(subtotal)}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-shrink-0">
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleAddedQtyChange(
+                                                produtoId,
+                                                Math.max(0, qty - 1),
+                                              )
+                                            }
+                                            className="w-8 h-8 rounded border border-gray-300 bg-white text-gray-700 font-bold leading-none flex items-center justify-center hover:bg-gray-100"
+                                            aria-label="Diminuir"
+                                          >
+                                            −
+                                          </button>
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            value={qty}
+                                            onChange={(e) =>
+                                              handleAddedQtyChange(
+                                                produtoId,
+                                                e.target.value,
+                                              )
+                                            }
+                                            className="w-16 h-8 px-2 border border-gray-300 rounded text-center focus:ring-2 focus:ring-blue-500 outline-none"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleAddedQtyChange(
+                                                produtoId,
+                                                qty + 1,
+                                              )
+                                            }
+                                            className="w-8 h-8 rounded border border-gray-300 bg-white text-gray-700 font-bold leading-none flex items-center justify-center hover:bg-gray-100"
+                                            aria-label="Aumentar"
+                                          >
+                                            +
+                                          </button>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleAddedQtyChange(produtoId, 0)
+                                          }
+                                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                                          aria-label="Remover item"
+                                          title="Remover item"
+                                        >
+                                          <LucideTrash2 size={16} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               {editingId === pedido.id && (
                                 <div className="flex justify-end bg-blue-50 border border-blue-200 p-3 rounded mt-2">
                                   <div className="text-right">
@@ -2477,7 +2650,18 @@
                                         itensPedido[pedido.id].reduce((sum, it) => {
                                           const q = editQuantities[it.id] ?? it.quantidade;
                                           return sum + it.preco_unitario * q;
-                                        }, 0),
+                                        }, 0) +
+                                          Object.entries(addedItems).reduce(
+                                            (sum, [pid, q]) => {
+                                              const p = produtosCatalogo.find(
+                                                (pr) => pr.id === pid,
+                                              );
+                                              return (
+                                                sum + (p ? p.preco_unitario * q : 0)
+                                              );
+                                            },
+                                            0,
+                                          ),
                                       )}
                                     </p>
                                   </div>
@@ -2488,6 +2672,98 @@
                             <p className="text-gray-600 text-sm">
                               Carregando itens...
                             </p>
+                          )}
+
+                          {editingId === pedido.id && (
+                            <div className="mt-4 bg-white border border-gray-200 rounded p-3">
+                              <h5 className="font-semibold text-gray-900 text-sm mb-2">
+                                Adicionar Produtos
+                              </h5>
+                              {loadingProdutos ? (
+                                <p className="text-sm text-gray-500">
+                                  Carregando catálogo...
+                                </p>
+                              ) : (
+                                <>
+                                  <div className="relative mb-2">
+                                    <LucideSearch
+                                      className="absolute left-3 top-2.5 text-gray-400"
+                                      size={18}
+                                    />
+                                    <input
+                                      type="text"
+                                      value={addSearchTerm}
+                                      onChange={(e) => setAddSearchTerm(e.target.value)}
+                                      placeholder="Buscar por código ou descrição..."
+                                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                    />
+                                  </div>
+                                  {addSearchTerm.trim().length > 0 ? (
+                                    (() => {
+                                      const term = addSearchTerm.toLowerCase();
+                                      const matches = produtosCatalogo
+                                        .filter((p) => {
+                                          return (
+                                            String(p.nome || "")
+                                              .toLowerCase()
+                                              .includes(term) ||
+                                            getCodigoInterno(p)
+                                              .toLowerCase()
+                                              .includes(term)
+                                          );
+                                        })
+                                        .sort((a, b) =>
+                                          String(a.nome || "").localeCompare(
+                                            String(b.nome || ""),
+                                            "pt-BR",
+                                            { sensitivity: "base" },
+                                          ),
+                                        )
+                                        .slice(0, 30);
+                                      if (matches.length === 0) {
+                                        return (
+                                          <p className="text-sm text-gray-500 text-center py-3">
+                                            Nenhum produto encontrado
+                                          </p>
+                                        );
+                                      }
+                                      return (
+                                        <div className="max-h-72 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded">
+                                          {matches.map((p) => (
+                                            <div
+                                              key={p.id}
+                                              className="flex items-center justify-between p-2 hover:bg-gray-50 gap-2"
+                                            >
+                                              <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-medium text-gray-900 truncate">
+                                                  {p.nome}
+                                                </p>
+                                                <p className="text-xs text-gray-500">
+                                                  {getCodigoInterno(p)} •{" "}
+                                                  {formatCurrency(p.preco_unitario)}
+                                                </p>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAddProduto(p)}
+                                                className="inline-flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium flex-shrink-0"
+                                              >
+                                                <LucidePlus size={14} />
+                                                Adicionar
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      );
+                                    })()
+                                  ) : (
+                                    <p className="text-xs text-gray-500">
+                                      Digite um código ou descrição para buscar produtos.
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           )}
                         </div>
 
