@@ -2005,6 +2005,10 @@
         const [expandedId, setExpandedId] = useState(null);
         const [itensPedido, setItensPedido] = useState({});
         const [changeStatus, setChangeStatus] = useState({});
+        const [editingId, setEditingId] = useState(null);
+        const [editQuantities, setEditQuantities] = useState({});
+        const [editObservacoes, setEditObservacoes] = useState("");
+        const [savingEdit, setSavingEdit] = useState(false);
 
         useEffect(() => {
           if (user) {
@@ -2086,6 +2090,7 @@
         const handleExpandClick = (pedidoId) => {
           if (expandedId === pedidoId) {
             setExpandedId(null);
+            if (editingId === pedidoId) handleCancelEdit();
           } else {
             setExpandedId(pedidoId);
             if (!itensPedido[pedidoId]) {
@@ -2117,6 +2122,104 @@
           } catch (err) {
             console.error("Error deleting pedido:", err);
             alert("Erro ao excluir pedido: " + err.message);
+          }
+        };
+
+        const handleStartEdit = (pedido) => {
+          const items = itensPedido[pedido.id] || [];
+          const quantities = {};
+          items.forEach((it) => {
+            quantities[it.id] = it.quantidade;
+          });
+          setEditingId(pedido.id);
+          setEditQuantities(quantities);
+          setEditObservacoes(pedido.observacoes || "");
+        };
+
+        const handleCancelEdit = () => {
+          setEditingId(null);
+          setEditQuantities({});
+          setEditObservacoes("");
+        };
+
+        const handleEditQtyChange = (itemId, value) => {
+          const qty = Math.max(0, parseInt(value) || 0);
+          setEditQuantities((prev) => ({ ...prev, [itemId]: qty }));
+        };
+
+        const handleSaveEdit = async (pedido) => {
+          const items = itensPedido[pedido.id] || [];
+          const toDelete = [];
+          const toUpdate = [];
+          let newValorTotal = 0;
+
+          items.forEach((item) => {
+            const newQty = editQuantities[item.id] ?? item.quantidade;
+            if (newQty <= 0) {
+              toDelete.push(item.id);
+            } else {
+              const preco_total = item.preco_unitario * newQty;
+              newValorTotal += preco_total;
+              if (newQty !== item.quantidade) {
+                toUpdate.push({ id: item.id, quantidade: newQty, preco_total });
+              }
+            }
+          });
+
+          if (items.length > 0 && toDelete.length === items.length) {
+            alert("O pedido precisa ter pelo menos um item. Para remover todos, exclua o pedido.");
+            return;
+          }
+
+          setSavingEdit(true);
+          try {
+            if (toDelete.length > 0) {
+              const { error } = await supabase
+                .from("itens_pedido")
+                .delete()
+                .in("id", toDelete);
+              if (error) throw error;
+            }
+
+            for (const upd of toUpdate) {
+              const { error } = await supabase
+                .from("itens_pedido")
+                .update({ quantidade: upd.quantidade, preco_total: upd.preco_total })
+                .eq("id", upd.id);
+              if (error) throw error;
+            }
+
+            const { error: pedError } = await supabase
+              .from("pedidos")
+              .update({
+                valor_total: newValorTotal,
+                observacoes: editObservacoes,
+              })
+              .eq("id", pedido.id);
+            if (pedError) throw pedError;
+
+            setPedidos((prev) =>
+              prev.map((p) =>
+                p.id === pedido.id
+                  ? { ...p, valor_total: newValorTotal, observacoes: editObservacoes }
+                  : p,
+              ),
+            );
+            const updatedItens = items
+              .filter((it) => !toDelete.includes(it.id))
+              .map((it) => {
+                const newQty = editQuantities[it.id] ?? it.quantidade;
+                return newQty !== it.quantidade
+                  ? { ...it, quantidade: newQty, preco_total: it.preco_unitario * newQty }
+                  : it;
+              });
+            setItensPedido((prev) => ({ ...prev, [pedido.id]: updatedItens }));
+            handleCancelEdit();
+          } catch (err) {
+            console.error("Erro ao salvar edição:", err);
+            alert("Erro ao salvar edição: " + err.message);
+          } finally {
+            setSavingEdit(false);
           }
         };
 
@@ -2279,29 +2382,107 @@
                           </h4>
                           {itensPedido[pedido.id] ? (
                             <div className="space-y-2">
-                              {itensPedido[pedido.id].map((item) => (
-                                <div
-                                  key={item.id}
-                                  className="flex items-center justify-between bg-white p-3 rounded border border-gray-200 gap-3"
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    <p className="font-medium text-gray-900 text-sm sm:text-base break-words">
-                                      {item.produtos.nome}
-                                    </p>
-                                    <p className="text-xs sm:text-sm text-gray-600">
-                                      {getCodigoInterno(item.produtos)}
-                                    </p>
+                              {itensPedido[pedido.id].map((item) => {
+                                const isEditing = editingId === pedido.id;
+                                const currentQty = isEditing
+                                  ? (editQuantities[item.id] ?? item.quantidade)
+                                  : item.quantidade;
+                                const subtotal = item.preco_unitario * currentQty;
+                                return (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-center justify-between bg-white p-3 rounded border border-gray-200 gap-3"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-medium text-gray-900 text-sm sm:text-base break-words">
+                                        {item.produtos.nome}
+                                      </p>
+                                      <p className="text-xs sm:text-sm text-gray-600">
+                                        {getCodigoInterno(item.produtos)}
+                                      </p>
+                                    </div>
+                                    {isEditing ? (
+                                      <div className="flex items-center gap-2 flex-shrink-0">
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleEditQtyChange(
+                                                item.id,
+                                                Math.max(0, currentQty - 1),
+                                              )
+                                            }
+                                            className="w-8 h-8 rounded border border-gray-300 bg-white text-gray-700 font-bold leading-none flex items-center justify-center hover:bg-gray-100"
+                                            aria-label="Diminuir"
+                                          >
+                                            −
+                                          </button>
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            value={currentQty}
+                                            onChange={(e) =>
+                                              handleEditQtyChange(
+                                                item.id,
+                                                e.target.value,
+                                              )
+                                            }
+                                            className="w-16 h-8 px-2 border border-gray-300 rounded text-center focus:ring-2 focus:ring-blue-500 outline-none"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleEditQtyChange(
+                                                item.id,
+                                                currentQty + 1,
+                                              )
+                                            }
+                                            className="w-8 h-8 rounded border border-gray-300 bg-white text-gray-700 font-bold leading-none flex items-center justify-center hover:bg-gray-100"
+                                            aria-label="Aumentar"
+                                          >
+                                            +
+                                          </button>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleEditQtyChange(item.id, 0)
+                                          }
+                                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                                          aria-label="Remover item"
+                                          title="Remover item"
+                                        >
+                                          <LucideTrash2 size={16} />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="text-right flex-shrink-0">
+                                        <p className="font-medium text-gray-900 text-sm sm:text-base">
+                                          {item.quantidade} un.
+                                        </p>
+                                        <p className="text-xs sm:text-sm text-gray-600">
+                                          {formatCurrency(item.preco_total)}
+                                        </p>
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className="text-right flex-shrink-0">
-                                    <p className="font-medium text-gray-900 text-sm sm:text-base">
-                                      {item.quantidade} un.
-                                    </p>
-                                    <p className="text-xs sm:text-sm text-gray-600">
-                                      {formatCurrency(item.preco_total)}
+                                );
+                              })}
+                              {editingId === pedido.id && (
+                                <div className="flex justify-end bg-blue-50 border border-blue-200 p-3 rounded mt-2">
+                                  <div className="text-right">
+                                    <p className="text-xs text-gray-600">Novo total</p>
+                                    <p className="text-lg font-bold text-blue-800">
+                                      {formatCurrency(
+                                        itensPedido[pedido.id].reduce((sum, it) => {
+                                          const q = editQuantities[it.id] ?? it.quantidade;
+                                          return sum + it.preco_unitario * q;
+                                        }, 0),
+                                      )}
                                     </p>
                                   </div>
                                 </div>
-                              ))}
+                              )}
                             </div>
                           ) : (
                             <p className="text-gray-600 text-sm">
@@ -2310,59 +2491,111 @@
                           )}
                         </div>
 
-                        {pedido.observacoes && (
+                        {editingId === pedido.id ? (
                           <div className="mb-6">
                             <p className="text-sm text-gray-600 mb-1">
                               Observações
                             </p>
-                            <p className="text-gray-900 bg-white p-3 rounded border border-gray-200">
-                              {pedido.observacoes}
-                            </p>
+                            <textarea
+                              value={editObservacoes}
+                              onChange={(e) => setEditObservacoes(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                              rows="3"
+                              placeholder="Adicione observações sobre o pedido..."
+                            />
                           </div>
+                        ) : (
+                          pedido.observacoes && (
+                            <div className="mb-6">
+                              <p className="text-sm text-gray-600 mb-1">
+                                Observações
+                              </p>
+                              <p className="text-gray-900 bg-white p-3 rounded border border-gray-200">
+                                {pedido.observacoes}
+                              </p>
+                            </div>
+                          )
                         )}
 
-                        {/* WhatsApp Share Button */}
-                        <div className="mb-4 flex flex-col sm:flex-row flex-wrap gap-2">
-                          <a
-                            href={
-                              "https://wa.me/?text=Requisicao%20de%20Material%0A%0APedido:%20RM-" +
-                              pedido.numero_pedido +
-                              "%0AData:%20" +
-                              formatDate(pedido.created_at) +
-                              "%0AMes:%20" +
-                              getMonthName(pedido.mes_referencia) +
-                              "%0AValor:%20" +
-                              formatCurrency(pedido.valor_total) +
-                              "%0AStatus:%20" +
-                              getStatusLabel(pedido.status)
-                            }
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
-                          >
-                            Compartilhar no WhatsApp
-                          </a>
-                          <div className="flex gap-2">
+                        {editingId === pedido.id ? (
+                          <div className="mb-4 flex flex-col sm:flex-row flex-wrap gap-2">
                             <button
-                              onClick={() =>
-                                generateOrderPDF(pedido, itensPedido[pedido.id], false)
-                              }
-                              className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1 sm:flex-none"
+                              onClick={() => handleSaveEdit(pedido)}
+                              disabled={savingEdit}
+                              className="inline-flex items-center justify-center gap-2 bg-blue-800 hover:bg-blue-900 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
                             >
-                              <LucideDownload size={18} />
-                              PDF Padrão
+                              {savingEdit ? (
+                                <>
+                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                  Salvando...
+                                </>
+                              ) : (
+                                <>
+                                  <LucideSave size={16} />
+                                  Salvar Alterações
+                                </>
+                              )}
                             </button>
                             <button
-                              onClick={() =>
-                                generateOrderPDF(pedido, itensPedido[pedido.id], true)
-                              }
-                              className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1 sm:flex-none"
+                              onClick={handleCancelEdit}
+                              disabled={savingEdit}
+                              className="inline-flex items-center justify-center gap-2 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium transition text-sm"
                             >
-                              <LucideImage size={18} />
-                              PDF c/ Imagens
+                              <LucideX size={16} />
+                              Cancelar
                             </button>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="mb-4 flex flex-col sm:flex-row flex-wrap gap-2">
+                            {pedido.status === "pendente" && (
+                              <button
+                                onClick={() => handleStartEdit(pedido)}
+                                className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                              >
+                                Editar Pedido
+                              </button>
+                            )}
+                            <a
+                              href={
+                                "https://wa.me/?text=Requisicao%20de%20Material%0A%0APedido:%20RM-" +
+                                pedido.numero_pedido +
+                                "%0AData:%20" +
+                                formatDate(pedido.created_at) +
+                                "%0AMes:%20" +
+                                getMonthName(pedido.mes_referencia) +
+                                "%0AValor:%20" +
+                                formatCurrency(pedido.valor_total) +
+                                "%0AStatus:%20" +
+                                getStatusLabel(pedido.status)
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition text-sm"
+                            >
+                              Compartilhar no WhatsApp
+                            </a>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() =>
+                                  generateOrderPDF(pedido, itensPedido[pedido.id], false)
+                                }
+                                className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1 sm:flex-none"
+                              >
+                                <LucideDownload size={18} />
+                                PDF Padrão
+                              </button>
+                              <button
+                                onClick={() =>
+                                  generateOrderPDF(pedido, itensPedido[pedido.id], true)
+                                }
+                                className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm flex-1 sm:flex-none"
+                              >
+                                <LucideImage size={18} />
+                                PDF c/ Imagens
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Status Change (Admin Only) */}
                         {userRole === "admin" && (
