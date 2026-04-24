@@ -75,11 +75,6 @@ serve(async (req) => {
     const basicAuth = btoa(`${clicUser}:${clicPass}`);
     const url = `${baseUrl}/clicVendas/rest/Listas/produtosPedido`;
 
-    // A API tem cap de 100 itens por chamada. Para trazer o catálogo
-    // completo iteramos por prefixos alfanuméricos e deduplicamos.
-    const CAP = 100;
-    const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("");
-
     const fetchFiltro = async (filtro: string): Promise<any[]> => {
       const res = await fetch(url, {
         method: "POST",
@@ -122,61 +117,93 @@ serve(async (req) => {
       }
     };
 
-    // Fase 1: varredura por 1 char.
-    const phase1 = await Promise.all(CHARS.map((c) => fetchFiltro(c)));
-    phase1.forEach((items) => ingest(items));
+    // Executa tarefas em paralelo limitado a `concurrency` por vez.
+    const runBatched = async <T>(
+      tasks: (() => Promise<T>)[],
+      concurrency: number,
+    ): Promise<T[]> => {
+      const results: T[] = new Array(tasks.length);
+      let next = 0;
+      const workers = Array.from({ length: concurrency }, async () => {
+        while (true) {
+          const i = next++;
+          if (i >= tasks.length) break;
+          results[i] = await tasks[i]();
+        }
+      });
+      await Promise.all(workers);
+      return results;
+    };
 
-    // Fase 2: onde a fase 1 bateu no cap, recurse com 2 chars.
-    const truncated1 = CHARS.filter((_, i) => phase1[i].length >= CAP);
-    const phase2Pairs: string[] = [];
-    const phase2Calls: Promise<any[]>[] = [];
-    for (const c1 of truncated1) {
-      for (const c2 of CHARS) {
-        phase2Pairs.push(c1 + c2);
-        phase2Calls.push(fetchFiltro(c1 + c2));
-      }
+    // Lê parâmetros opcionais do body. produto_id permite sincronizar
+    // apenas um item específico (útil pra reaproveitar o mesmo endpoint
+    // sem rodar a fila inteira).
+    let produtoIdAlvo: string | null = null;
+    try {
+      const body = await req.json();
+      if (body?.produto_id) produtoIdAlvo = String(body.produto_id);
+    } catch {
+      // body vazio ou não-JSON — ok, segue com sync completo dos ativos.
     }
-    const phase2 = await Promise.all(phase2Calls);
-    phase2.forEach((items) => ingest(items));
 
-    // Fase 3: onde a fase 2 bateu no cap, recurse com 3 chars.
-    const truncated2 = phase2Pairs.filter((_, i) => phase2[i].length >= CAP);
-    const phase3Calls: Promise<any[]>[] = [];
-    for (const pair of truncated2) {
-      for (const c of CHARS) {
-        phase3Calls.push(fetchFiltro(pair + c));
-      }
-    }
-    const phase3 = await Promise.all(phase3Calls);
-    phase3.forEach((items) => ingest(items));
-
-    // Busca produtos do Supabase que têm codigo_interno.
-    const { data: produtos, error: prodErr } = await supabase
+    // Busca produtos do Supabase que têm codigo_interno válido.
+    // - Sync completo: apenas itens ativos.
+    // - Sync individual: traz mesmo se inativo (admin escolheu o item).
+    let produtosQuery = supabase
       .from("produtos")
       .select(
-        "id, codigo_interno, nome, preco_unitario, preco_clic, imagem_url",
+        "id, codigo_interno, nome, preco_unitario, preco_clic, imagem_url, ativo",
       )
       .not("codigo_interno", "is", null);
-    if (prodErr) throw prodErr;
 
-    // Fase 4: para produtos do sistema ainda sem correspondência, busca
-    // pelo nome (primeiros N chars) como filtro. Cobre produtos raros
-    // que não saíram na varredura alfabética.
-    const faltantesApos123 = (produtos || []).filter((p) => {
+    if (produtoIdAlvo) {
+      produtosQuery = produtosQuery.eq("id", produtoIdAlvo);
+    } else {
+      produtosQuery = produtosQuery.eq("ativo", true);
+    }
+
+    const { data: produtos, error: prodErr } = await produtosQuery;
+    if (prodErr) throw prodErr;
+    if (produtoIdAlvo && (!produtos || produtos.length === 0)) {
+      return jsonResponse(
+        { error: "Produto não encontrado ou sem código interno" },
+        404,
+      );
+    }
+
+    const produtosComCodigo = (produtos || []).filter((p) => {
       const cod = String(p.codigo_interno ?? "").trim();
-      return cod && cod !== "0" && !clicMap.has(cod);
+      return cod && cod !== "0";
     });
+
+    // Fase 1: 1 chamada por codigo_interno do sistema, usando o código
+    // como filtro. Executa em lotes de 15 em paralelo.
+    const codigos = Array.from(
+      new Set(produtosComCodigo.map((p) => String(p.codigo_interno).trim())),
+    );
+    const phase1 = await runBatched(
+      codigos.map((cod) => () => fetchFiltro(cod)),
+      15,
+    );
+    phase1.forEach((items) => ingest(items));
+
+    // Fase 2: para produtos que ainda não bateram (caso o filtro não
+    // indexe por código), busca pelo início do nome.
+    const faltantesApos1 = produtosComCodigo.filter(
+      (p) => !clicMap.has(String(p.codigo_interno).trim()),
+    );
     const prefixosNome = Array.from(
       new Set(
-        faltantesApos123
+        faltantesApos1
           .map((p) => (p.nome || "").trim().slice(0, 6).toUpperCase())
           .filter((s) => s.length >= 2),
       ),
     );
-    const phase4 = await Promise.all(
-      prefixosNome.map((pre) => fetchFiltro(pre)),
+    const phase2 = await runBatched(
+      prefixosNome.map((pre) => () => fetchFiltro(pre)),
+      15,
     );
-    phase4.forEach((items) => ingest(items));
+    phase2.forEach((items) => ingest(items));
 
     let updated = 0;
     let notFound = 0;
@@ -258,11 +285,9 @@ serve(async (req) => {
       amostra_codigos_sistema: amostraSistema,
       faltantes,
       chamadas: {
-        fase1: phase1.length,
-        fase2: phase2.length,
-        fase3: phase3.length,
-        fase4: phase4.length,
-        total: phase1.length + phase2.length + phase3.length + phase4.length,
+        fase1_codigos: phase1.length,
+        fase2_prefixos_nome: phase2.length,
+        total: phase1.length + phase2.length,
       },
     });
   } catch (err) {
