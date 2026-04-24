@@ -99,8 +99,52 @@ serve(async (req) => {
 
     const clicMap = new Map<
       string,
-      { preco: number; imgId: string; nome: string }
+      {
+        preco: number;
+        imgId: string;
+        nome: string;
+        marca: string;
+        estoque: number | null;
+      }
     >();
+    const pickMarca = (p: any, item: any): string => {
+      const candidates = [
+        p?.marca,
+        p?.nomeMarca,
+        p?.descricaoMarca,
+        p?.marca?.nome,
+        p?.marca?.descricao,
+        item?.marca,
+        item?.marca?.nome,
+      ];
+      for (const c of candidates) {
+        if (typeof c === "string" && c.trim()) return c.trim();
+      }
+      return "";
+    };
+    const pickEstoque = (p: any, item: any): number | null => {
+      // No endpoint /produtosPedido do ClicVendas, o saldo do estoque
+      // principal vem em produto.qtdeEstoque.
+      const candidates = [
+        p?.qtdeEstoque,
+        p?.estoque,
+        p?.saldo,
+        p?.saldoEstoque,
+        p?.quantidadeEstoque,
+        item?.qtdeEstoque,
+        item?.estoque,
+        item?.saldo,
+        item?.saldoEstoque,
+        item?.quantidade,
+        item?.quantidadeEstoque,
+      ];
+      for (const c of candidates) {
+        if (c === null || c === undefined || c === "") continue;
+        const n = Number(c);
+        if (!Number.isNaN(n)) return n;
+      }
+      return null;
+    };
     const ingest = (items: any[]) => {
       for (const item of items) {
         const p = item?.produto;
@@ -113,6 +157,8 @@ serve(async (req) => {
           preco: Number(item.preco) || 0,
           imgId: String(p.imgProduto || "").trim(),
           nome: String(p.nome || ""),
+          marca: pickMarca(p, item),
+          estoque: pickEstoque(p, item),
         });
       }
     };
@@ -205,8 +251,20 @@ serve(async (req) => {
     );
     phase2.forEach((items) => ingest(items));
 
+    // Pega o local padrão (o sistema hoje opera com 1 local ativo).
+    // Usado pra fazer upsert do saldo de estoque vindo do ClicVendas.
+    const { data: localPadraoRow } = await supabase
+      .from("locais")
+      .select("id")
+      .eq("ativo", true)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const localPadraoId: string | null = localPadraoRow?.id ?? null;
+
     let updated = 0;
     let notFound = 0;
+    let estoquesAtualizados = 0;
     const alertasPreco: Array<{
       id: string;
       codigo: string;
@@ -236,13 +294,16 @@ serve(async (req) => {
         ? `${baseUrl}/clicvenda/produtos/${subdominio}/${clic.imgId}.jpg`
         : prod.imagem_url;
 
+      const updatePayload: Record<string, unknown> = {
+        preco_clic: clic.preco,
+        imagem_url: novaImg,
+        preco_clic_atualizado_em: new Date().toISOString(),
+      };
+      if (clic.marca) updatePayload.marca = clic.marca;
+
       const { error: upErr } = await supabase
         .from("produtos")
-        .update({
-          preco_clic: clic.preco,
-          imagem_url: novaImg,
-          preco_clic_atualizado_em: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq("id", prod.id);
 
       if (upErr) {
@@ -251,6 +312,35 @@ serve(async (req) => {
       }
 
       updated++;
+
+      // Upsert do saldo de estoque no local padrão.
+      if (localPadraoId && clic.estoque !== null) {
+        const { data: estExist } = await supabase
+          .from("estoque")
+          .select("id")
+          .eq("produto_id", prod.id)
+          .eq("local_id", localPadraoId)
+          .maybeSingle();
+        if (estExist?.id) {
+          const { error: estErr } = await supabase
+            .from("estoque")
+            .update({
+              quantidade: clic.estoque,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", estExist.id);
+          if (!estErr) estoquesAtualizados++;
+        } else {
+          const { error: estErr } = await supabase
+            .from("estoque")
+            .insert({
+              produto_id: prod.id,
+              local_id: localPadraoId,
+              quantidade: clic.estoque,
+            });
+          if (!estErr) estoquesAtualizados++;
+        }
+      }
 
       const precoSistema = Number(prod.preco_unitario) || 0;
       if (precoSistema > 0 && precoSistema < clic.preco) {
@@ -278,6 +368,7 @@ serve(async (req) => {
       total_clic: clicMap.size,
       total_sistema: produtos?.length || 0,
       atualizados: updated,
+      estoques_atualizados: estoquesAtualizados,
       nao_encontrados: notFound,
       alertas_preco: alertasPreco,
       erros,
