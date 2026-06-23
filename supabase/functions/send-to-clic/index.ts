@@ -16,7 +16,11 @@ const json = (b: unknown, s = 200) =>
 const AUTH_URL   = () => Deno.env.get("CLIC_AUTH_URL")        || "https://admfw.clictecnologia.com.br";
 const BASE_URL   = () => Deno.env.get("CLIC_BASE_URL")        || "https://grupoello.clictecnologia.com.br";
 const SUBDOMINIO = () => Deno.env.get("CLIC_SUBDOMINIO")      || "grupoello";
-const COD_CLIENTE = () => Deno.env.get("CLIC_COD_CLIENTE")    || "34871";
+const COD_CLIENTE     = () => Deno.env.get("CLIC_COD_CLIENTE")     || "34871";
+const DOC_CLIENTE     = () => Deno.env.get("CLIC_DOC_CLIENTE")     || "20645508000154";
+const DOC_REP         = () => Deno.env.get("CLIC_DOC_REP")         || "79086306500";
+const PREFIXO_COD     = () => Deno.env.get("CLIC_PREFIXO_COD")     || "10";
+const TABELA_PRECO    = () => Deno.env.get("CLIC_TABELA_PRECO")    || "1001";
 
 async function clicLogin(): Promise<string> {
   const res = await fetch(`${AUTH_URL()}/auth/login`, {
@@ -82,7 +86,9 @@ serve(async (req) => {
     const itensClic = (itens as any[])
       .filter((i) => i.produtos?.codigo_interno && String(i.produtos.codigo_interno).trim() !== "0")
       .map((i) => ({
-        codigoProduto: String(i.produtos.codigo_interno).trim(),
+        codigoProduto:      `${PREFIXO_COD()}_${String(i.produtos.codigo_interno).trim()}`,
+        codigoVariacao:     " ",
+        codigoTabelaPreco:  TABELA_PRECO(),
         quantidade:    Number(i.quantidade),
         precoUnitario: Number(i.preco_unitario),
       }));
@@ -105,6 +111,8 @@ serve(async (req) => {
     // Tenta POST /api/extpedidos (endpoint padrão para criação de pedidos)
     const payload = {
       codigoCliente: COD_CLIENTE(),
+      numeroDocumentoCliente: DOC_CLIENTE(),
+      numeroDocumentoRepresentante: DOC_REP(),
       observacao: pedido.observacoes || `RM-${pedido.numero_pedido}`,
       itens: itensClic,
     };
@@ -112,7 +120,7 @@ serve(async (req) => {
     const clicRes = await fetch(`${BASE_URL()}/api/extpedidos`, {
       method: "POST",
       headers,
-      body: JSON.stringify(payload),
+      body: JSON.stringify([payload]),
     });
 
     const clicBody = await clicRes.text();
@@ -120,12 +128,19 @@ serve(async (req) => {
     try { clicData = JSON.parse(clicBody); } catch { clicData = clicBody; }
 
     if (!clicRes.ok) {
-      // Devolve o erro do CLic para diagnóstico
       return json({
         error: `CLic recusou o pedido (HTTP ${clicRes.status})`,
         detalhe: clicData,
         payload_enviado: payload,
       }, 502);
+    }
+
+    // CLic retorna 200 mesmo com falhas — verifica totalFalhas
+    const totalFalhas   = clicData?.totalFalhas   ?? 0;
+    const totalSucessos = clicData?.totalSucessos ?? 0;
+    if (totalFalhas > 0 && totalSucessos === 0) {
+      const msg = clicData?.resultados?.[0]?.mensagem || clicData?.mensagem || "Falha no CLic";
+      return json({ error: msg, detalhe: clicData, payload_enviado: payload }, 502);
     }
 
     // Sucesso — marca o pedido como enviado ao CLic
