@@ -2107,6 +2107,8 @@
         const [loadingProdutos, setLoadingProdutos] = useState(false);
         const [addedItems, setAddedItems] = useState({});
         const [addSearchTerm, setAddSearchTerm] = useState("");
+        const [sendingClic, setSendingClic] = useState({});
+        const [clicResult, setClicResult] = useState({});
 
         useEffect(() => {
           if (user) {
@@ -2194,6 +2196,38 @@
             if (!itensPedido[pedidoId]) {
               fetchItensPedido(pedidoId);
             }
+          }
+        };
+
+        const handleSendToClic = async (pedido) => {
+          if (!window.confirm(`Enviar pedido ${formatNumeroPedido(pedido.numero_pedido)} para o CLic?`)) return;
+          setSendingClic((prev) => ({ ...prev, [pedido.id]: true }));
+          setClicResult((prev) => ({ ...prev, [pedido.id]: null }));
+          try {
+            const { data, error } = await supabase.functions.invoke("send-to-clic", {
+              body: { pedido_id: pedido.id },
+            });
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error + (data.detalhe ? " — " + JSON.stringify(data.detalhe) : ""));
+            setClicResult((prev) => ({
+              ...prev,
+              [pedido.id]: {
+                ok: true,
+                msg: `Enviado! ${data.itens_enviados} item(ns) registrado(s) no CLic.` +
+                  (data.itens_sem_codigo?.length ? ` (${data.itens_sem_codigo.length} sem código ignorado(s))` : ""),
+              },
+            }));
+            // Atualiza o campo enviado_clic localmente sem precisar recarregar
+            setPedidos((prev) =>
+              prev.map((p) => p.id === pedido.id ? { ...p, enviado_clic: true } : p)
+            );
+          } catch (err) {
+            setClicResult((prev) => ({
+              ...prev,
+              [pedido.id]: { ok: false, msg: err.message || "Erro ao enviar para o CLic" },
+            }));
+          } finally {
+            setSendingClic((prev) => ({ ...prev, [pedido.id]: false }));
           }
         };
 
@@ -3007,7 +3041,33 @@
                                 </button>
                               ))}
                             </div>
-                            <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end">
+                            <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
+                              {/* Botão Enviar para CLic */}
+                              <div className="flex flex-col gap-1">
+                                <button
+                                  onClick={() => handleSendToClic(pedido)}
+                                  disabled={!!sendingClic[pedido.id]}
+                                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition text-sm ${
+                                    pedido.enviado_clic
+                                      ? "bg-green-100 text-green-700 border border-green-300 cursor-default"
+                                      : "bg-orange-500 hover:bg-orange-600 text-white"
+                                  }`}
+                                >
+                                  {sendingClic[pedido.id] ? (
+                                    <><span className="animate-spin">⟳</span> Enviando...</>
+                                  ) : pedido.enviado_clic ? (
+                                    <>✓ Enviado ao CLic</>
+                                  ) : (
+                                    <>🛒 Enviar para CLic</>
+                                  )}
+                                </button>
+                                {clicResult[pedido.id] && (
+                                  <p className={`text-xs ${clicResult[pedido.id].ok ? "text-green-700" : "text-red-600"}`}>
+                                    {clicResult[pedido.id].msg}
+                                  </p>
+                                )}
+                              </div>
+
                               <button
                                 onClick={() => handleDeletePedido(pedido)}
                                 className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition text-sm"

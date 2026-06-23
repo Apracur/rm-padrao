@@ -1,7 +1,8 @@
 // Supabase Edge Function: sync-clicvendas
-// Busca produtos no portal ClicVendas via API REST e atualiza preco_clic
-// e imagem_url dos produtos correspondentes no Supabase (matching por
-// codigo_interno == codExterno).
+// Migrado para a nova API CLic (clictecnologia.com.br):
+//   - Auth: POST /auth/login em admfw.clictecnologia.com.br → JWT Bearer
+//   - Dados: GET /api/extprodutos em grupoello.clictecnologia.com.br (paginado)
+// Atualiza preco_clic, imagem_url, marca e estoque no Supabase.
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
@@ -19,12 +20,122 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { ...CORS, "Content-Type": "application/json" },
   });
 
+// ─── Configuração da nova API CLic ───────────────────────────────────────────
+// Auth fica em admfw; os dados no subdomínio do cliente.
+const AUTH_URL    = () => Deno.env.get("CLIC_AUTH_URL")   || "https://admfw.clictecnologia.com.br";
+const BASE_URL    = () => Deno.env.get("CLIC_BASE_URL")   || "https://grupoello.clictecnologia.com.br";
+const SUBDOMINIO  = () => Deno.env.get("CLIC_SUBDOMINIO") || "grupoello";
+const DEPOSITO    = () => Deno.env.get("CLIC_DEPOSITO")   || "001";
+
+// ─── Login → obtém accessToken (JWT) ─────────────────────────────────────────
+async function clicLogin(user: string, pass: string): Promise<string> {
+  const res = await fetch(`${AUTH_URL()}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ login: user, senha: pass, subdominio: SUBDOMINIO() }),
+  });
+  if (!res.ok) {
+    let detalhe = "";
+    try { detalhe = JSON.stringify(await res.json()); } catch { /* ignora */ }
+    throw new Error(`Falha no login CLic (HTTP ${res.status}). ${detalhe}`);
+  }
+  const data = await res.json() as any;
+  if (!data?.accessToken) throw new Error("Login CLic não retornou accessToken.");
+  return data.accessToken as string;
+}
+
+// ─── Busca todos os produtos via /api/extprodutos (paginado) ─────────────────
+// Retorna também a estrutura bruta da primeira página para diagnóstico.
+async function fetchTodosProdutos(
+  token: string,
+): Promise<{ produtos: any[]; primeiraResposta: any }> {
+  const PAGE = 100;
+  const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+  const all: any[] = [];
+  let primeiraResposta: any = null;
+
+  for (let skip = 0; skip < 100_000; skip += PAGE) {
+    const url = `${BASE_URL()}/api/extprodutos?fetch=${PAGE}&skip=${skip}&sortBy=codigo&sortDescAsc=ASC`;
+    const res = await fetch(url, { method: "GET", headers });
+    if (!res.ok) throw new Error(`Falha ao buscar produtos CLic (HTTP ${res.status}).`);
+    const data = await res.json() as any;
+
+    if (skip === 0) primeiraResposta = data;
+
+    // Tenta as chaves mais comuns de resposta paginada.
+    let dados: any[] = [];
+    if (Array.isArray(data))          dados = data;
+    else if (Array.isArray(data?.dados))    dados = data.dados;
+    else if (Array.isArray(data?.produtos)) dados = data.produtos;
+    else if (Array.isArray(data?.items))    dados = data.items;
+    else if (Array.isArray(data?.data))     dados = data.data;
+    else if (Array.isArray(data?.result))   dados = data.result;
+
+    all.push(...dados);
+    if (dados.length < PAGE) break; // última página
+  }
+  return { produtos: all, primeiraResposta };
+}
+
+// ─── Extrai preço do produto ──────────────────────────────────────────────────
+function precoDoProduto(p: any): number | null {
+  for (const tabela of p?.precos ?? []) {
+    for (const faixa of tabela?.precos ?? []) {
+      const preco = Number(faixa?.preco);
+      if (isFinite(preco) && preco > 0) return preco;
+    }
+  }
+  return null;
+}
+
+// ─── Extrai saldo do depósito configurado ────────────────────────────────────
+function estoqueDoProduto(p: any): number | null {
+  const arr = Array.isArray(p?.estoques) ? p.estoques : null;
+  if (!arr) return null;
+  const dep = arr.find((e: any) => String(e?.codigoDeposito ?? "").trim() === DEPOSITO());
+  if (!dep) return 0;
+  const q = Number(dep.quantidade);
+  return isFinite(q) ? q : 0;
+}
+
+// ─── Variações de código do produto para matching ────────────────────────────
+function codigosDoProduto(p: any): string[] {
+  const out = new Set<string>();
+  const add = (v: any) => {
+    const s = String(v ?? "").trim();
+    if (s) out.add(s);
+  };
+  add(p?.backoffice?.codigo);                                  // "11166"
+  add(p?.codigo);                                             // "10_11166"
+  if (p?.codigo) add(String(p.codigo).replace(/^\d+_/, "")); // remove prefixo "10_"
+  return [...out];
+}
+
+// ─── Extrai URL da imagem (melhor candidato disponível) ──────────────────────
+function imagemDoProduto(p: any): string | null {
+  // A API pode fornecer a imagem em diferentes campos dependendo da versão.
+  const imgId =
+    String(p?.imgProduto || p?.imagem || p?.imagemId || "").trim();
+  if (!imgId) return null;
+  // Monta URL no mesmo padrão da API anterior.
+  return `${BASE_URL()}/clicvenda/produtos/${SUBDOMINIO()}/${imgId}.jpg`;
+}
+
+// ─── Extrai marca ─────────────────────────────────────────────────────────────
+function marcaDoProduto(p: any): string {
+  const candidates = [p?.marca, p?.nomeMarca, p?.descricaoMarca, p?.marca?.nome];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return "";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     // Valida usuário autenticado e papel admin.
     const authHeader = req.headers.get("Authorization") || "";
@@ -32,174 +143,82 @@ serve(async (req) => {
     if (!token) return jsonResponse({ error: "Não autenticado" }, 401);
 
     const supabase = createClient(supabaseUrl, serviceKey);
-    const { data: userData, error: userErr } = await supabase.auth.getUser(
-      token,
-    );
+    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userData?.user) {
       return jsonResponse(
-        {
-          error: "Sessão inválida",
-          detail: userErr?.message || "usuário não encontrado",
-        },
+        { error: "Sessão inválida", detail: userErr?.message || "usuário não encontrado" },
         401,
       );
     }
-    const user = userData.user;
 
     const { data: perfil } = await supabase
       .from("perfis")
       .select("role")
-      .eq("email", user.email)
+      .eq("email", userData.user.email)
       .single();
     if (perfil?.role !== "admin") {
       return jsonResponse({ error: "Apenas administradores" }, 403);
     }
 
-    // Credenciais e parâmetros do ClicVendas (armazenados como secrets).
-    const clicUser = Deno.env.get("CLICVENDAS_USER");
-    const clicPass = Deno.env.get("CLICVENDAS_PASS");
-    const cnpjId = Deno.env.get("CLICVENDAS_CNPJ_ID") || "76";
-    const listaPrecoId = Deno.env.get("CLICVENDAS_LISTA_PRECO_ID") || "96686";
-    const subdominio = Deno.env.get("CLICVENDAS_SUBDOMINIO") || "grupoello";
-    const baseUrl =
-      Deno.env.get("CLICVENDAS_BASE_URL") ||
-      "https://grupoello.clicvenda.com.br";
+    // Credenciais da nova API CLic.
+    // Suporta tanto os nomes antigos (CLICVENDAS_*) quanto os novos (CLIC_*).
+    const clicUser =
+      Deno.env.get("CLIC_USER") || Deno.env.get("CLICVENDAS_USER");
+    const clicPass =
+      Deno.env.get("CLIC_PASS") || Deno.env.get("CLICVENDAS_PASS");
 
     if (!clicUser || !clicPass) {
       return jsonResponse(
-        { error: "Credenciais do ClicVendas não configuradas" },
+        { error: "Credenciais do CLic não configuradas (CLIC_USER / CLIC_PASS)" },
         500,
       );
     }
 
-    const basicAuth = btoa(`${clicUser}:${clicPass}`);
-    const url = `${baseUrl}/clicVendas/rest/Listas/produtosPedido`;
-
-    const fetchFiltro = async (filtro: string): Promise<any[]> => {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json;charset=UTF-8",
-          Accept: "application/json, text/plain, */*",
-          Authorization: `Basic ${basicAuth}`,
-        },
-        body: JSON.stringify({
-          filtro,
-          idCvTccnpj: cnpjId,
-          idCvTolistapreco: Number(listaPrecoId),
-        }),
-      });
-      if (!res.ok) return [];
-      try {
-        return (await res.json()) as any[];
-      } catch {
-        return [];
-      }
-    };
-
-    const clicMap = new Map<
-      string,
-      {
-        preco: number;
-        imgId: string;
-        nome: string;
-        marca: string;
-        estoque: number | null;
-      }
-    >();
-    const pickMarca = (p: any, item: any): string => {
-      const candidates = [
-        p?.marca,
-        p?.nomeMarca,
-        p?.descricaoMarca,
-        p?.marca?.nome,
-        p?.marca?.descricao,
-        item?.marca,
-        item?.marca?.nome,
-      ];
-      for (const c of candidates) {
-        if (typeof c === "string" && c.trim()) return c.trim();
-      }
-      return "";
-    };
-    const pickEstoque = (p: any, item: any): number | null => {
-      // No endpoint /produtosPedido do ClicVendas, o saldo do estoque
-      // principal vem em produto.qtdeEstoque.
-      const candidates = [
-        p?.qtdeEstoque,
-        p?.estoque,
-        p?.saldo,
-        p?.saldoEstoque,
-        p?.quantidadeEstoque,
-        item?.qtdeEstoque,
-        item?.estoque,
-        item?.saldo,
-        item?.saldoEstoque,
-        item?.quantidade,
-        item?.quantidadeEstoque,
-      ];
-      for (const c of candidates) {
-        if (c === null || c === undefined || c === "") continue;
-        const n = Number(c);
-        if (!Number.isNaN(n)) return n;
-      }
-      return null;
-    };
-    const ingest = (items: any[]) => {
-      for (const item of items) {
-        const p = item?.produto;
-        if (!p) continue;
-        const codigo = p.codExterno ?? p.codigo ?? p.codInterno ?? p.id;
-        if (codigo === undefined || codigo === null || codigo === "") continue;
-        const key = String(codigo).trim();
-        if (clicMap.has(key)) continue;
-        clicMap.set(key, {
-          preco: Number(item.preco) || 0,
-          imgId: String(p.imgProduto || "").trim(),
-          nome: String(p.nome || ""),
-          marca: pickMarca(p, item),
-          estoque: pickEstoque(p, item),
-        });
-      }
-    };
-
-    // Executa tarefas em paralelo limitado a `concurrency` por vez.
-    const runBatched = async <T>(
-      tasks: (() => Promise<T>)[],
-      concurrency: number,
-    ): Promise<T[]> => {
-      const results: T[] = new Array(tasks.length);
-      let next = 0;
-      const workers = Array.from({ length: concurrency }, async () => {
-        while (true) {
-          const i = next++;
-          if (i >= tasks.length) break;
-          results[i] = await tasks[i]();
-        }
-      });
-      await Promise.all(workers);
-      return results;
-    };
-
-    // Lê parâmetros opcionais do body. produto_id permite sincronizar
-    // apenas um item específico (útil pra reaproveitar o mesmo endpoint
-    // sem rodar a fila inteira).
+    // Parâmetro opcional: sincronizar apenas um produto específico.
     let produtoIdAlvo: string | null = null;
     try {
       const body = await req.json();
       if (body?.produto_id) produtoIdAlvo = String(body.produto_id);
     } catch {
-      // body vazio ou não-JSON — ok, segue com sync completo dos ativos.
+      // body vazio ou não-JSON — sync completo.
+    }
+
+    // 1) Login → JWT  2) Baixa todos os produtos da nova API.
+    const clicToken  = await clicLogin(clicUser, clicPass);
+    const { produtos: produtosClic, primeiraResposta } = await fetchTodosProdutos(clicToken);
+
+    // Monta mapa código → dados (indexando todas as variações de código).
+    const clicMap = new Map<string, {
+      preco: number;
+      imagem: string | null;
+      marca: string;
+      estoque: number | null;
+      nome: string;
+    }>();
+
+    for (const p of produtosClic) {
+      const preco   = precoDoProduto(p);
+      const estoque = estoqueDoProduto(p);
+      const imagem  = imagemDoProduto(p);
+      const marca   = marcaDoProduto(p);
+      const nome    = String(p?.nome || "");
+
+      for (const cod of codigosDoProduto(p)) {
+        if (clicMap.has(cod)) continue;
+        clicMap.set(cod, {
+          preco:   preco ?? 0,
+          imagem,
+          marca,
+          estoque,
+          nome,
+        });
+      }
     }
 
     // Busca produtos do Supabase que têm codigo_interno válido.
-    // - Sync completo: apenas itens ativos.
-    // - Sync individual: traz mesmo se inativo (admin escolheu o item).
     let produtosQuery = supabase
       .from("produtos")
-      .select(
-        "id, codigo_interno, nome, preco_unitario, preco_clic, imagem_url, ativo",
-      )
+      .select("id, codigo_interno, nome, preco_unitario, preco_clic, imagem_url, ativo")
       .not("codigo_interno", "is", null);
 
     if (produtoIdAlvo) {
@@ -211,48 +230,10 @@ serve(async (req) => {
     const { data: produtos, error: prodErr } = await produtosQuery;
     if (prodErr) throw prodErr;
     if (produtoIdAlvo && (!produtos || produtos.length === 0)) {
-      return jsonResponse(
-        { error: "Produto não encontrado ou sem código interno" },
-        404,
-      );
+      return jsonResponse({ error: "Produto não encontrado ou sem código interno" }, 404);
     }
 
-    const produtosComCodigo = (produtos || []).filter((p) => {
-      const cod = String(p.codigo_interno ?? "").trim();
-      return cod && cod !== "0";
-    });
-
-    // Fase 1: 1 chamada por codigo_interno do sistema, usando o código
-    // como filtro. Executa em lotes de 15 em paralelo.
-    const codigos = Array.from(
-      new Set(produtosComCodigo.map((p) => String(p.codigo_interno).trim())),
-    );
-    const phase1 = await runBatched(
-      codigos.map((cod) => () => fetchFiltro(cod)),
-      15,
-    );
-    phase1.forEach((items) => ingest(items));
-
-    // Fase 2: para produtos que ainda não bateram (caso o filtro não
-    // indexe por código), busca pelo início do nome.
-    const faltantesApos1 = produtosComCodigo.filter(
-      (p) => !clicMap.has(String(p.codigo_interno).trim()),
-    );
-    const prefixosNome = Array.from(
-      new Set(
-        faltantesApos1
-          .map((p) => (p.nome || "").trim().slice(0, 6).toUpperCase())
-          .filter((s) => s.length >= 2),
-      ),
-    );
-    const phase2 = await runBatched(
-      prefixosNome.map((pre) => () => fetchFiltro(pre)),
-      15,
-    );
-    phase2.forEach((items) => ingest(items));
-
-    // Pega o local padrão (o sistema hoje opera com 1 local ativo).
-    // Usado pra fazer upsert do saldo de estoque vindo do ClicVendas.
+    // Pega o local padrão para upsert de estoque.
     const { data: localPadraoRow } = await supabase
       .from("locais")
       .select("id")
@@ -266,23 +247,20 @@ serve(async (req) => {
     let notFound = 0;
     let estoquesAtualizados = 0;
     const alertasPreco: Array<{
-      id: string;
-      codigo: string;
-      nome: string;
-      preco_sistema: number;
-      preco_clic: number;
-      diferenca: number;
+      id: string; codigo: string; nome: string;
+      preco_sistema: number; preco_clic: number; diferenca: number;
     }> = [];
     const erros: Array<{ id: string; nome: string; error: string }> = [];
     const faltantes: Array<{ cod: string; nome: string }> = [];
 
     for (const prod of produtos || []) {
-      const cod = String(prod.codigo_interno).trim();
+      const cod = String(prod.codigo_interno ?? "").trim();
       if (!cod || cod === "0") {
         notFound++;
         faltantes.push({ cod: cod || "0", nome: prod.nome });
         continue;
       }
+
       const clic = clicMap.get(cod);
       if (!clic) {
         notFound++;
@@ -290,16 +268,13 @@ serve(async (req) => {
         continue;
       }
 
-      const novaImg = clic.imgId
-        ? `${baseUrl}/clicvenda/produtos/${subdominio}/${clic.imgId}.jpg`
-        : prod.imagem_url;
-
       const updatePayload: Record<string, unknown> = {
         preco_clic: clic.preco,
-        imagem_url: novaImg,
         preco_clic_atualizado_em: new Date().toISOString(),
       };
-      if (clic.marca) updatePayload.marca = clic.marca;
+      // Atualiza imagem apenas se a nova API forneceu uma.
+      if (clic.imagem) updatePayload.imagem_url = clic.imagem;
+      if (clic.marca)  updatePayload.marca = clic.marca;
 
       const { error: upErr } = await supabase
         .from("produtos")
@@ -313,7 +288,7 @@ serve(async (req) => {
 
       updated++;
 
-      // Upsert do saldo de estoque no local padrão.
+      // Upsert de estoque no local padrão.
       if (localPadraoId && clic.estoque !== null) {
         const { data: estExist } = await supabase
           .from("estoque")
@@ -321,23 +296,17 @@ serve(async (req) => {
           .eq("produto_id", prod.id)
           .eq("local_id", localPadraoId)
           .maybeSingle();
+
         if (estExist?.id) {
           const { error: estErr } = await supabase
             .from("estoque")
-            .update({
-              quantidade: clic.estoque,
-              updated_at: new Date().toISOString(),
-            })
+            .update({ quantidade: clic.estoque, updated_at: new Date().toISOString() })
             .eq("id", estExist.id);
           if (!estErr) estoquesAtualizados++;
         } else {
           const { error: estErr } = await supabase
             .from("estoque")
-            .insert({
-              produto_id: prod.id,
-              local_id: localPadraoId,
-              quantidade: clic.estoque,
-            });
+            .insert({ produto_id: prod.id, local_id: localPadraoId, quantidade: clic.estoque });
           if (!estErr) estoquesAtualizados++;
         }
       }
@@ -345,17 +314,14 @@ serve(async (req) => {
       const precoSistema = Number(prod.preco_unitario) || 0;
       if (precoSistema > 0 && precoSistema < clic.preco) {
         alertasPreco.push({
-          id: prod.id,
-          codigo: cod,
-          nome: prod.nome,
-          preco_sistema: precoSistema,
-          preco_clic: clic.preco,
+          id: prod.id, codigo: cod, nome: prod.nome,
+          preco_sistema: precoSistema, preco_clic: clic.preco,
           diferenca: +(clic.preco - precoSistema).toFixed(2),
         });
       }
     }
 
-    // Amostras pra diagnosticar mismatch de códigos quando nada é atualizado.
+    // Amostras para diagnóstico de mismatch.
     const amostraClic = Array.from(clicMap.entries())
       .slice(0, 10)
       .map(([cod, v]) => ({ cod, nome: v.nome, preco: v.preco }));
@@ -375,11 +341,12 @@ serve(async (req) => {
       amostra_codigos_clicvendas: amostraClic,
       amostra_codigos_sistema: amostraSistema,
       faltantes,
-      chamadas: {
-        fase1_codigos: phase1.length,
-        fase2_prefixos_nome: phase2.length,
-        total: phase1.length + phase2.length,
-      },
+      // Inclui estrutura bruta da 1ª página quando não há produtos (diagnóstico).
+      ...(clicMap.size === 0 && {
+        debug_primeira_resposta: typeof primeiraResposta === "object"
+          ? { chaves: Object.keys(primeiraResposta ?? {}), amostra: JSON.stringify(primeiraResposta).slice(0, 500) }
+          : { tipo: typeof primeiraResposta, valor: String(primeiraResposta).slice(0, 200) },
+      }),
     });
   } catch (err) {
     return jsonResponse(
