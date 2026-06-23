@@ -1,7 +1,3 @@
-// Supabase Edge Function: send-to-clic
-// Envia um pedido do sistema RM para o CLic, criando um pedido de venda
-// no nome do cliente (código 34871) via API REST (JWT Bearer).
-
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
@@ -22,6 +18,31 @@ const DOC_REP         = () => Deno.env.get("CLIC_DOC_REP")         || "790863065
 const PREFIXO_COD     = () => Deno.env.get("CLIC_PREFIXO_COD")     || "10";
 const TABELA_PRECO    = () => Deno.env.get("CLIC_TABELA_PRECO")    || "1001";
 
+// Campos que o CLic retorna como string mas exige número no POST
+const NUMERIC_FIELDS = new Set([
+  'altura', 'largura', 'comprimento', 'profundidade', 'volume',
+  'peso', 'pesoBruto', 'pesoLiquido',
+  'ipi', 'multiplos',
+  'estoque', 'estoqueMinimo', 'estoqueMaximo', 'prazoEntrega',
+  'quantidade', 'desconto', 'preco',
+]);
+
+function fixProduto(obj: any): any {
+  if (Array.isArray(obj)) return obj.map(fixProduto);
+  if (obj && typeof obj === 'object') {
+    const out: any = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (NUMERIC_FIELDS.has(k) && typeof v === 'string') {
+        out[k] = Number(v) || 0;
+      } else {
+        out[k] = fixProduto(v);
+      }
+    }
+    return out;
+  }
+  return obj;
+}
+
 async function clicLogin(): Promise<string> {
   const res = await fetch(`${AUTH_URL()}/auth/login`, {
     method: "POST",
@@ -38,6 +59,64 @@ async function clicLogin(): Promise<string> {
   return data.accessToken as string;
 }
 
+// Busca produtos do CLic por código interno e atualiza preços na tabela 1001.
+// Retorna mapa de avisos caso algum produto não seja encontrado.
+async function atualizarPrecosClic(
+  headers: Record<string, string>,
+  itens: { codigoInterno: string; precoUnitario: number }[],
+): Promise<string[]> {
+  const codigosNecessarios = new Set(itens.map((i) => i.codigoInterno));
+  const mapa = new Map<string, any>(); // codigoInterno -> produto CLic
+
+  for (let skip = 0; mapa.size < codigosNecessarios.size; skip += 100) {
+    const r = await fetch(`${BASE_URL()}/api/extprodutos?fetch=100&skip=${skip}`, { headers });
+    if (!r.ok) break;
+    const raw = await r.json() as any;
+    const lista: any[] = raw?.dados ?? [];
+    if (!lista.length) break;
+    for (const p of lista) {
+      if (codigosNecessarios.has(p.backoffice?.codigo)) {
+        mapa.set(p.backoffice.codigo, p);
+      }
+    }
+  }
+
+  // Monta batch de atualizações de preço
+  const atualizacoes: any[] = [];
+  for (const item of itens) {
+    const prod = mapa.get(item.codigoInterno);
+    if (!prod) continue;
+    const prodAtualizado = fixProduto(prod);
+    for (const tp of prodAtualizado.precos ?? []) {
+      if (tp.codigoTabela === TABELA_PRECO()) {
+        tp.precos = [{ quantidade: 999999999, desconto: 0, preco: item.precoUnitario }];
+      }
+    }
+    atualizacoes.push(prodAtualizado);
+  }
+
+  if (atualizacoes.length === 0) return ["Nenhum produto encontrado no CLic para atualizar preço"];
+
+  const updateRes = await fetch(`${BASE_URL()}/api/extprodutos`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(atualizacoes),
+  });
+  const updateData = await updateRes.json() as any;
+  if ((updateData?.totalFalhas ?? 0) > 0) {
+    const msg = updateData?.resultados?.[0]?.mensagem || "Erro ao atualizar preço CLic";
+    throw new Error(`Falha ao atualizar preço no CLic: ${msg}`);
+  }
+
+  const avisos: string[] = [];
+  for (const item of itens) {
+    if (!mapa.has(item.codigoInterno)) {
+      avisos.push(`Produto ${item.codigoInterno} não encontrado no CLic (preço não atualizado)`);
+    }
+  }
+  return avisos;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
@@ -48,7 +127,6 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Autentica usuário
     const authHeader = req.headers.get("Authorization") || "";
     const userToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!userToken) return json({ error: "Não autenticado" }, 401);
@@ -60,12 +138,10 @@ serve(async (req) => {
       .from("perfis").select("role").eq("email", user.email).single();
     if (perfil?.role !== "admin") return json({ error: "Apenas administradores" }, 403);
 
-    // Lê o pedido_id do body
     const body = await req.json() as any;
     const pedidoId = body?.pedido_id;
     if (!pedidoId) return json({ error: "pedido_id obrigatório" }, 400);
 
-    // Busca o pedido e seus itens no Supabase
     const { data: pedido, error: pedErr } = await supabase
       .from("pedidos")
       .select("id, numero_pedido, status, observacoes")
@@ -82,15 +158,19 @@ serve(async (req) => {
     if (!itens || itens.length === 0)
       return json({ error: "Pedido sem itens" }, 400);
 
-    // Monta os itens para o CLic
     const itensClic = (itens as any[])
       .filter((i) => i.produtos?.codigo_interno && String(i.produtos.codigo_interno).trim() !== "0")
       .map((i) => ({
-        codigoProduto:      `${PREFIXO_COD()}_${String(i.produtos.codigo_interno).trim()}`,
-        codigoVariacao:     " ",
-        codigoTabelaPreco:  TABELA_PRECO(),
-        quantidade:    Number(i.quantidade),
-        precoUnitario: Number(i.preco_unitario),
+        codigoProduto:     `${PREFIXO_COD()}_${String(i.produtos.codigo_interno).trim()}`,
+        codigoVariacao:    " ",
+        codigoTabelaPreco: TABELA_PRECO(),
+        quantidade:        Number(i.quantidade),
+        precoUnitario:     Number(i.preco_unitario),
+        valorOriginal:     Number(i.preco_unitario),
+        desconto:          0,
+        // guarda codigo_interno para a atualização de preço
+        _codigoInterno:    String(i.produtos.codigo_interno).trim(),
+        _precoUnitario:    Number(i.preco_unitario),
       }));
 
     if (itensClic.length === 0)
@@ -100,7 +180,6 @@ serve(async (req) => {
       .filter((i) => !i.produtos?.codigo_interno || String(i.produtos.codigo_interno).trim() === "0")
       .map((i) => i.produtos?.nome || "?");
 
-    // Login CLic e envio do pedido
     const clicToken = await clicLogin();
     const headers = {
       Authorization: `Bearer ${clicToken}`,
@@ -108,13 +187,23 @@ serve(async (req) => {
       Accept: "application/json",
     };
 
-    // Tenta POST /api/extpedidos (endpoint padrão para criação de pedidos)
+    // Atualiza preços na tabela CLic antes de criar o pedido
+    const itensParaPreco = itensClic.map((i) => ({
+      codigoInterno: i._codigoInterno,
+      precoUnitario: i._precoUnitario,
+    }));
+    const avisos = await atualizarPrecosClic(headers, itensParaPreco);
+
+    // Remove campos internos antes de enviar o pedido
+    const itensPedido = itensClic.map(({ _codigoInterno: _a, _precoUnitario: _b, ...rest }) => rest);
+
     const payload = {
-      codigoCliente: COD_CLIENTE(),
-      numeroDocumentoCliente: DOC_CLIENTE(),
+      codigoCliente:                COD_CLIENTE(),
+      numeroDocumentoCliente:       DOC_CLIENTE(),
       numeroDocumentoRepresentante: DOC_REP(),
-      observacao: pedido.observacoes || `RM-${pedido.numero_pedido}`,
-      itens: itensClic,
+      codigoTabelaPreco:            TABELA_PRECO(),
+      observacao:                   pedido.observacoes || `RM-${pedido.numero_pedido}`,
+      itens:                        itensPedido,
     };
 
     const clicRes = await fetch(`${BASE_URL()}/api/extpedidos`, {
@@ -135,7 +224,6 @@ serve(async (req) => {
       }, 502);
     }
 
-    // CLic retorna 200 mesmo com falhas — verifica totalFalhas
     const totalFalhas   = clicData?.totalFalhas   ?? 0;
     const totalSucessos = clicData?.totalSucessos ?? 0;
     if (totalFalhas > 0 && totalSucessos === 0) {
@@ -143,7 +231,6 @@ serve(async (req) => {
       return json({ error: msg, detalhe: clicData, payload_enviado: payload }, 502);
     }
 
-    // Sucesso — marca o pedido como enviado ao CLic
     await supabase
       .from("pedidos")
       .update({ enviado_clic: true, enviado_clic_em: new Date().toISOString() })
@@ -152,8 +239,9 @@ serve(async (req) => {
     return json({
       ok: true,
       pedido_clic: clicData,
-      itens_enviados: itensClic.length,
+      itens_enviados: itensPedido.length,
       itens_sem_codigo: itensSemCodigo,
+      avisos,
     });
   } catch (err) {
     return json({ error: (err as Error).message || "Erro desconhecido" }, 500);
