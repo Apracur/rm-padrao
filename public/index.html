@@ -2231,6 +2231,46 @@
           }
         };
 
+        const handleExportarParaClic = async (pedido) => {
+          try {
+            const { data: itens, error } = await supabase
+              .from("itens_pedido")
+              .select("quantidade, preco_unitario, produtos(nome, codigo_interno, unidade, preco_clic)")
+              .eq("pedido_id", pedido.id);
+            if (error) throw error;
+
+            const linhas = (itens || [])
+              .filter(it => it.produtos?.codigo_interno && String(it.produtos.codigo_interno).trim() !== "0")
+              .map(it => {
+                const codigo = String(it.produtos.codigo_interno).trim();
+                const nome = (it.produtos.nome || "").replace(/;/g, " ");
+                const qtd = it.quantidade;
+                const embalagem = it.produtos.unidade || "UN";
+                const preco = Number(it.preco_unitario) || Number(it.produtos?.preco_clic) || 0;
+                return `${codigo};${nome};${qtd};${embalagem};0;${preco.toFixed(2).replace(".", ",")}`;
+              });
+
+            if (!linhas.length) {
+              alert("Nenhum produto com código interno encontrado neste pedido.");
+              return;
+            }
+
+            const cabecalho = "1 - Codigo;2 - Nome;3 - Quantidade;4 - Embalagem;5 - Percentual Desconto;6 - Valor de venda unitario";
+            const csv = [cabecalho, ...linhas].join("\r\n");
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `pedido-${formatNumeroPedido(pedido.numero_pedido)}-clic.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch (err) {
+            alert("Erro ao exportar CSV: " + (err.message || "Erro desconhecido"));
+          }
+        };
+
         const handleDeletePedido = async (pedido) => {
           const confirmMsg =
             `Excluir o pedido ${formatNumeroPedido(pedido.numero_pedido)}?\n\n` +
@@ -3042,25 +3082,35 @@
                               ))}
                             </div>
                             <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
-                              {/* Botão Enviar para CLic */}
+                              {/* Botões de integração CLic */}
                               <div className="flex flex-col gap-1">
-                                <button
-                                  onClick={() => handleSendToClic(pedido)}
-                                  disabled={!!sendingClic[pedido.id]}
-                                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition text-sm ${
-                                    pedido.enviado_clic
-                                      ? "bg-green-100 text-green-700 border border-green-300 cursor-default"
-                                      : "bg-orange-500 hover:bg-orange-600 text-white"
-                                  }`}
-                                >
-                                  {sendingClic[pedido.id] ? (
-                                    <><span className="animate-spin">⟳</span> Enviando...</>
-                                  ) : pedido.enviado_clic ? (
-                                    <>✓ Enviado ao CLic</>
-                                  ) : (
-                                    <>🛒 Enviar para CLic</>
-                                  )}
-                                </button>
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    onClick={() => handleSendToClic(pedido)}
+                                    disabled={!!sendingClic[pedido.id]}
+                                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition text-sm ${
+                                      pedido.enviado_clic
+                                        ? "bg-green-100 text-green-700 border border-green-300 cursor-default"
+                                        : "bg-orange-500 hover:bg-orange-600 text-white"
+                                    }`}
+                                  >
+                                    {sendingClic[pedido.id] ? (
+                                      <><span className="animate-spin">⟳</span> Enviando...</>
+                                    ) : pedido.enviado_clic ? (
+                                      <>✓ Enviado ao CLic</>
+                                    ) : (
+                                      <>🛒 Enviar para CLic</>
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => handleExportarParaClic(pedido)}
+                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition text-sm bg-blue-600 hover:bg-blue-700 text-white"
+                                    title="Baixar CSV no formato de importação do CLic"
+                                  >
+                                    <LucideDownload size={15} />
+                                    CSV para CLic
+                                  </button>
+                                </div>
                                 {clicResult[pedido.id] && (
                                   <p className={`text-xs ${clicResult[pedido.id].ok ? "text-green-700" : "text-red-600"}`}>
                                     {clicResult[pedido.id].msg}
@@ -4214,6 +4264,8 @@
         const [successMsg, setSuccessMsg] = useState("");
         const [errorMsg, setErrorMsg] = useState("");
         const [importPreview, setImportPreview] = useState(null);
+        const [importandoClic, setImportandoClic] = useState(false);
+        const [importClicResult, setImportClicResult] = useState(null);
         const fileInputRef = useRef();
 
         useEffect(() => {
@@ -4640,6 +4692,30 @@
           }
         };
 
+        const handleImportarDoClic = async () => {
+          if (!window.confirm("Importar produtos do CLic para o sistema?\n\nProdutos que já existem (mesmo código interno) serão ignorados. Apenas produtos novos serão criados.")) return;
+          setImportandoClic(true);
+          setImportClicResult(null);
+          try {
+            const { data, error } = await supabase.functions.invoke("sync-clicvendas", {
+              body: { mode: "import_produtos" },
+            });
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+            setImportClicResult(data);
+            if ((data?.importados ?? 0) > 0) {
+              await fetchAll();
+              showSuccess(`${data.importados} produto(s) importado(s) do CLic com sucesso!`);
+            } else {
+              showSuccess("Nenhum produto novo encontrado no CLic.");
+            }
+          } catch (err) {
+            showError("Erro ao importar do CLic: " + (err.message || "Erro desconhecido"));
+          } finally {
+            setImportandoClic(false);
+          }
+        };
+
         const handleExportEstoque = () => {
           const rows = [];
           for (const produto of produtos) {
@@ -4803,6 +4879,19 @@
               </h2>
               <div className="flex flex-wrap gap-2">
                 <button
+                  onClick={handleImportarDoClic}
+                  disabled={importandoClic}
+                  className="bg-purple-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition flex items-center gap-2 text-sm"
+                  title="Importar produtos novos do CLic para o sistema"
+                >
+                  {importandoClic ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  ) : (
+                    <LucideDownload size={18} />
+                  )}
+                  <span>{importandoClic ? "Importando..." : "Importar do CLic"}</span>
+                </button>
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadingFile}
                   className="bg-green-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition flex items-center gap-2 text-sm"
@@ -4836,6 +4925,24 @@
               onChange={handleFileUpload}
               className="hidden"
             />
+
+            {/* Resultado da importação do CLic */}
+            {importClicResult && (
+              <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg px-4 py-3 text-sm text-purple-800 flex items-start justify-between gap-4">
+                <div>
+                  <strong>Importação do CLic concluída:</strong>{" "}
+                  <span className="text-green-700 font-semibold">{importClicResult.importados} novo(s) importado(s)</span>
+                  {" · "}
+                  <span>{importClicResult.ja_existem} já existiam</span>
+                  {" · "}
+                  <span>Total no CLic: {importClicResult.total_clic}</span>
+                  {importClicResult.erros?.length > 0 && (
+                    <span className="text-red-600 ml-2">· {importClicResult.erros.length} erro(s)</span>
+                  )}
+                </div>
+                <button onClick={() => setImportClicResult(null)} className="text-purple-400 hover:text-purple-700 text-lg leading-none flex-shrink-0">×</button>
+              </div>
+            )}
 
             {/* Tip about Excel format */}
             <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-700">

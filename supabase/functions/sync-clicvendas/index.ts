@@ -174,11 +174,13 @@ serve(async (req) => {
       );
     }
 
-    // Parâmetro opcional: sincronizar apenas um produto específico.
+    // Parâmetros opcionais do body.
     let produtoIdAlvo: string | null = null;
+    let mode: string | null = null;
     try {
       const body = await req.json();
       if (body?.produto_id) produtoIdAlvo = String(body.produto_id);
+      if (body?.mode)       mode           = String(body.mode);
     } catch {
       // body vazio ou não-JSON — sync completo.
     }
@@ -213,6 +215,58 @@ serve(async (req) => {
           nome,
         });
       }
+    }
+
+    // ── Mode: import_produtos — cria no Supabase produtos que existem no CLic mas ainda não estão cadastrados ──
+    if (mode === "import_produtos") {
+      const { data: existentes } = await supabase
+        .from("produtos")
+        .select("codigo_interno")
+        .not("codigo_interno", "is", null);
+
+      const codigosExistentes = new Set(
+        (existentes || []).map((p: any) => String(p.codigo_interno ?? "").trim()),
+      );
+
+      const aInserir: Array<{
+        nome: string; codigo_interno: string; marca: string | null;
+        preco_unitario: number; imagem_url: string | null; ativo: boolean; unidade: string;
+      }> = [];
+      let jaExistem = 0;
+
+      for (const p of produtosClic) {
+        const codigo = String(p?.backoffice?.codigo ?? "").trim();
+        if (!codigo || codigo === "0") continue;
+        if (codigosExistentes.has(codigo)) { jaExistem++; continue; }
+        const nome = String(p?.nome ?? "").trim();
+        if (!nome) continue;
+        aInserir.push({
+          nome,
+          codigo_interno: codigo,
+          marca: marcaDoProduto(p) || null,
+          preco_unitario: precoDoProduto(p) ?? 0,
+          imagem_url: imagemDoProduto(p),
+          ativo: true,
+          unidade: "UN",
+        });
+      }
+
+      let importados = 0;
+      const errosImport: string[] = [];
+      const LOTE = 50;
+      for (let i = 0; i < aInserir.length; i += LOTE) {
+        const { error } = await supabase.from("produtos").insert(aInserir.slice(i, i + LOTE));
+        if (error) errosImport.push(error.message);
+        else importados += Math.min(LOTE, aInserir.length - i);
+      }
+
+      return jsonResponse({
+        mode: "import_produtos",
+        total_clic: produtosClic.length,
+        ja_existem: jaExistem,
+        importados,
+        erros: errosImport,
+      });
     }
 
     // Busca produtos do Supabase que têm codigo_interno válido.
