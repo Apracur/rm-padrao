@@ -2242,7 +2242,7 @@
             const linhas = (itens || [])
               .filter(it => it.produtos?.codigo_interno && String(it.produtos.codigo_interno).trim() !== "0")
               .map(it => {
-                const codigo = String(it.produtos.codigo_interno).trim();
+                const codigo = "10_" + String(it.produtos.codigo_interno).trim();
                 const nome = (it.produtos.nome || "").replace(/;/g, " ");
                 const qtd = it.quantidade;
                 const embalagem = it.produtos.unidade || "UN";
