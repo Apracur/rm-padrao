@@ -117,6 +117,6 @@ SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  # Injetadas automaticamente
 ## Deploy
 
 - **GitHub:** `https://github.com/Apracur/rm-padrao`
-- **Vercel:** deploy automático no push para `main` — projeto `rm-padrao`, produção em **`https://rm-padrao.vercel.app`**. O antigo `rm-padrao-sistema.vercel.app` foi apagado e responde `DEPLOYMENT_NOT_FOUND`; o `.vercel/project.json` local ainda aponta para ele (rode `npx vercel link` se for usar a CLI).
+- **Vercel:** deploy automático no push para `main` — projeto `rm-padrao`, produção em **`https://rm-padrao.vercel.app`**. O antigo `rm-padrao-sistema.vercel.app` foi apagado e responde `DEPLOYMENT_NOT_FOUND`. O `.vercel/` fica fora do Git: numa máquina nova, rode `npx vercel link --project rm-padrao` antes de usar a CLI.
 - **Supabase:** `vejkkbotkggviqjempop.supabase.co`
 - Primeiro usuário admin: criar via Supabase Dashboard (Authentication → Users) e inserir `role = 'admin'` na tabela `perfis`
