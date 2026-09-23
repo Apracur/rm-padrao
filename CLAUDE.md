@@ -83,7 +83,8 @@ Modos (via body do POST):
 |---|---|
 | `{}` | Sync completo: preço, marca, estoque **e** imagens |
 | `{"mode":"sync_imagens"}` | Só as fotos, sem tocar em preço/estoque |
-| `{"mode":"import_produtos"}` | Cria no Supabase os produtos que só existem no CLic |
+| `{"mode":"listar_novos"}` | Lista (sem gravar) os produtos que só existem no CLic |
+| `{"mode":"import_produtos","codigos":[...]}` | Cria só os códigos escolhidos e espelha as fotos. Sem `codigos` → 400 (evita trazer o catálogo inteiro, ~2.500 itens) |
 | `{"force_imagens":true}` | Re-baixa as fotos já espelhadas (use quando mudarem no CLic) |
 | `{"produto_id":"..."}` | Restringe a um produto |
 

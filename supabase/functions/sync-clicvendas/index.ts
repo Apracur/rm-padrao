@@ -409,13 +409,22 @@ serve(async (req) => {
     let produtoIdAlvo: string | null = null;
     let mode: string | null = null;
     let forceImagens = false;
+    let codigosEscolhidos: string[] = [];
     try {
       const body = await req.json();
       if (body?.produto_id) produtoIdAlvo = String(body.produto_id);
       if (body?.mode)       mode           = String(body.mode);
       if (body?.force_imagens === true) forceImagens = true;
+      if (Array.isArray(body?.codigos)) {
+        codigosEscolhidos = body.codigos.map((c: unknown) => String(c ?? "").trim()).filter(Boolean);
+      }
     } catch {
       // body vazio ou não-JSON — sync completo.
+    }
+
+    // Importar sem escolher os itens traria o catálogo inteiro do CLic (~2.500 produtos).
+    if (mode === "import_produtos" && codigosEscolhidos.length === 0) {
+      return jsonResponse({ error: "Escolha ao menos um produto para importar (campo 'codigos')." }, 400);
     }
 
     // 1) Login → JWT  2) Baixa todos os produtos da nova API.
@@ -450,8 +459,9 @@ serve(async (req) => {
       }
     }
 
-    // ── Mode: import_produtos — cria no Supabase produtos que existem no CLic mas ainda não estão cadastrados ──
-    if (mode === "import_produtos") {
+    // ── Modes: listar_novos / import_produtos — produtos que existem no CLic mas ainda não estão cadastrados ──
+    // listar_novos só devolve os candidatos; import_produtos cria apenas os códigos escolhidos.
+    if (mode === "listar_novos" || mode === "import_produtos") {
       const { data: existentes } = await supabase
         .from("produtos")
         .select("codigo_interno")
@@ -461,19 +471,21 @@ serve(async (req) => {
         (existentes || []).map((p: any) => String(p.codigo_interno ?? "").trim()),
       );
 
-      const aInserir: Array<{
+      const novos: Array<{
         nome: string; codigo_interno: string; marca: string | null;
         preco_unitario: number; imagem_url: string | null; ativo: boolean; unidade: string;
       }> = [];
+      const codigosVistos = new Set<string>();
       let jaExistem = 0;
 
       for (const p of produtosClic) {
         const codigo = String(p?.backoffice?.codigo ?? "").trim();
-        if (!codigo || codigo === "0") continue;
+        if (!codigo || codigo === "0" || codigosVistos.has(codigo)) continue;
+        codigosVistos.add(codigo);
         if (codigosExistentes.has(codigo)) { jaExistem++; continue; }
         const nome = String(p?.nome ?? "").trim();
         if (!nome) continue;
-        aInserir.push({
+        novos.push({
           nome,
           codigo_interno: codigo,
           marca: marcaDoProduto(p) || null,
@@ -484,20 +496,50 @@ serve(async (req) => {
         });
       }
 
+      if (mode === "listar_novos") {
+        novos.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+        return jsonResponse({
+          mode: "listar_novos",
+          total_clic: produtosClic.length,
+          ja_existem: jaExistem,
+          novos: novos.map(({ nome, codigo_interno, marca, preco_unitario, imagem_url }) =>
+            ({ nome, codigo_interno, marca, preco_unitario, imagem_url })),
+        });
+      }
+
+      const escolhidos = new Set(codigosEscolhidos);
+      const aInserir = novos.filter((n) => escolhidos.has(n.codigo_interno));
+
       let importados = 0;
       const errosImport: string[] = [];
+      const inseridos: Array<{ id: string; nome: string; codigo_interno: string; imagem_url: string | null }> = [];
       const LOTE = 50;
       for (let i = 0; i < aInserir.length; i += LOTE) {
-        const { error } = await supabase.from("produtos").insert(aInserir.slice(i, i + LOTE));
+        const { data, error } = await supabase
+          .from("produtos")
+          .insert(aInserir.slice(i, i + LOTE))
+          .select("id, nome, codigo_interno, imagem_url");
         if (error) errosImport.push(error.message);
-        else importados += Math.min(LOTE, aInserir.length - i);
+        else {
+          importados += data?.length ?? 0;
+          inseridos.push(...(data || []));
+        }
       }
+
+      // Espelha as fotos dos recém-criados no Storage (senão o PDF sai sem foto — ver CLAUDE.md).
+      const urlClicPorCodigo = new Map<string, string | null>(
+        aInserir.map((n) => [n.codigo_interno, n.imagem_url]),
+      );
+      const { novasUrls } = await espelharImagensDosProdutos(supabase, inseridos, urlClicPorCodigo, false);
+      const gravacao = await gravarImagensEspelhadas(supabase, novasUrls);
 
       return jsonResponse({
         mode: "import_produtos",
         total_clic: produtosClic.length,
         ja_existem: jaExistem,
+        solicitados: escolhidos.size,
         importados,
+        imagens_espelhadas: gravacao.gravadas,
         erros: errosImport,
       });
     }

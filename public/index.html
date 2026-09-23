@@ -4206,6 +4206,9 @@
         const [importPreview, setImportPreview] = useState(null);
         const [importandoClic, setImportandoClic] = useState(false);
         const [importClicResult, setImportClicResult] = useState(null);
+        const [clicCandidatos, setClicCandidatos] = useState(null);
+        const [clicSelecionados, setClicSelecionados] = useState(() => new Set());
+        const [clicBusca, setClicBusca] = useState("");
         const fileInputRef = useRef();
 
         useEffect(() => {
@@ -4632,23 +4635,75 @@
           }
         };
 
+        // Abre a lista de produtos que existem no CLic e ainda não estão no sistema, para escolher quais importar.
         const handleImportarDoClic = async () => {
-          if (!window.confirm("Importar produtos do CLic para o sistema?\n\nProdutos que já existem (mesmo código interno) serão ignorados. Apenas produtos novos serão criados.")) return;
           setImportandoClic(true);
           setImportClicResult(null);
           try {
             const { data, error } = await supabase.functions.invoke("sync-clicvendas", {
-              body: { mode: "import_produtos" },
+              body: { mode: "listar_novos" },
+            });
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+            if (!data?.novos?.length) {
+              showSuccess("Nenhum produto novo encontrado no CLic.");
+              return;
+            }
+            setClicSelecionados(new Set());
+            setClicBusca("");
+            setClicCandidatos(data.novos);
+          } catch (err) {
+            showError("Erro ao consultar o CLic: " + (err.message || "Erro desconhecido"));
+          } finally {
+            setImportandoClic(false);
+          }
+        };
+
+        const clicCandidatosFiltrados = useMemo(() => {
+          if (!clicCandidatos) return [];
+          const termo = clicBusca.trim().toLowerCase();
+          if (!termo) return clicCandidatos;
+          return clicCandidatos.filter((c) =>
+            c.nome.toLowerCase().includes(termo) ||
+            c.codigo_interno.toLowerCase().includes(termo) ||
+            (c.marca || "").toLowerCase().includes(termo)
+          );
+        }, [clicCandidatos, clicBusca]);
+
+        const toggleClicSelecionado = (codigo) => {
+          setClicSelecionados((prev) => {
+            const next = new Set(prev);
+            if (next.has(codigo)) next.delete(codigo);
+            else next.add(codigo);
+            return next;
+          });
+        };
+
+        const marcarClicFiltrados = (marcar) => {
+          setClicSelecionados((prev) => {
+            const next = new Set(prev);
+            for (const c of clicCandidatosFiltrados) {
+              if (marcar) next.add(c.codigo_interno);
+              else next.delete(c.codigo_interno);
+            }
+            return next;
+          });
+        };
+
+        const handleConfirmarImportarClic = async () => {
+          const codigos = [...clicSelecionados];
+          if (codigos.length === 0) return;
+          setImportandoClic(true);
+          try {
+            const { data, error } = await supabase.functions.invoke("sync-clicvendas", {
+              body: { mode: "import_produtos", codigos },
             });
             if (error) throw error;
             if (data?.error) throw new Error(data.error);
             setImportClicResult(data);
-            if ((data?.importados ?? 0) > 0) {
-              await fetchAll();
-              showSuccess(`${data.importados} produto(s) importado(s) do CLic com sucesso!`);
-            } else {
-              showSuccess("Nenhum produto novo encontrado no CLic.");
-            }
+            setClicCandidatos(null);
+            await fetchAll();
+            showSuccess(`${data.importados} produto(s) importado(s) do CLic com sucesso!`);
           } catch (err) {
             showError("Erro ao importar do CLic: " + (err.message || "Erro desconhecido"));
           } finally {
@@ -4729,6 +4784,122 @@
               <div className="fixed top-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-sm shadow-lg z-50">
                 <span className="text-red-600 text-xl mt-0.5">✗</span>
                 <p className="font-medium text-red-800 text-sm">{errorMsg}</p>
+              </div>
+            )}
+
+            {/* Seleção de produtos do CLic para importar */}
+            {clicCandidatos && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+                <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+                  <div className="p-4 sm:p-6 border-b border-gray-200">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-lg sm:text-xl font-bold text-gray-800">Importar produtos do CLic</h3>
+                        <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                          {clicCandidatos.length} produto(s) do CLic ainda não estão no sistema. Marque os que deseja importar.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setClicCandidatos(null)}
+                        disabled={importandoClic}
+                        className="text-gray-400 hover:text-gray-700 flex-shrink-0"
+                        title="Fechar"
+                      >
+                        <LucideX size={22} />
+                      </button>
+                    </div>
+                    <div className="relative mt-4">
+                      <LucideSearch className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                      <input
+                        type="text"
+                        autoFocus
+                        value={clicBusca}
+                        onChange={(e) => setClicBusca(e.target.value)}
+                        placeholder="Buscar por nome, código ou marca..."
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 mt-3 text-xs sm:text-sm">
+                      <span className="text-gray-600">
+                        {clicCandidatosFiltrados.length} exibido(s) · <strong className="text-purple-700">{clicSelecionados.size} selecionado(s)</strong>
+                      </span>
+                      {clicBusca.trim() && clicCandidatosFiltrados.length > 0 && (
+                        <button onClick={() => marcarClicFiltrados(true)} className="text-purple-700 hover:underline">
+                          Marcar os exibidos
+                        </button>
+                      )}
+                      {clicSelecionados.size > 0 && (
+                        <button onClick={() => setClicSelecionados(new Set())} className="text-gray-500 hover:underline">
+                          Limpar seleção
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto flex-1">
+                    {clicCandidatosFiltrados.length === 0 ? (
+                      <p className="p-6 text-center text-sm text-gray-500">Nenhum produto encontrado para essa busca.</p>
+                    ) : (
+                      <ul className="divide-y divide-gray-100">
+                        {clicCandidatosFiltrados.slice(0, 200).map((c) => {
+                          const marcado = clicSelecionados.has(c.codigo_interno);
+                          return (
+                            <li key={c.codigo_interno}>
+                              <label className={`flex items-center gap-3 px-4 sm:px-6 py-2 cursor-pointer hover:bg-purple-50 ${marcado ? "bg-purple-50" : ""}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={marcado}
+                                  onChange={() => toggleClicSelecionado(c.codigo_interno)}
+                                  className="h-4 w-4 accent-purple-600 flex-shrink-0"
+                                />
+                                <div className="w-10 h-10 rounded bg-gray-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
+                                  {c.imagem_url && (
+                                    <img src={c.imagem_url} alt="" loading="lazy" className="w-full h-full object-contain"
+                                      onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{c.nome}</p>
+                                  <p className="text-xs text-gray-500">
+                                    Cód. {c.codigo_interno}{c.marca ? ` · ${c.marca}` : ""}
+                                  </p>
+                                </div>
+                                <span className="text-sm text-gray-700 flex-shrink-0">{formatCurrency(c.preco_unitario)}</span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    {clicCandidatosFiltrados.length > 200 && (
+                      <p className="px-6 py-3 text-xs text-center text-gray-500 bg-gray-50">
+                        Mostrando 200 de {clicCandidatosFiltrados.length}. Use a busca para encontrar os demais.
+                      </p>
+                    )}
+                  </div>
+                  <div className="p-4 sm:p-6 border-t border-gray-200 flex gap-3 justify-end">
+                    <button
+                      onClick={() => setClicCandidatos(null)}
+                      disabled={importandoClic}
+                      className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleConfirmarImportarClic}
+                      disabled={importandoClic || clicSelecionados.size === 0}
+                      className="px-5 py-2 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 disabled:bg-gray-400 transition flex items-center gap-2"
+                    >
+                      {importandoClic ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Importando...
+                        </>
+                      ) : (
+                        <>Importar {clicSelecionados.size} produto(s)</>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -4822,14 +4993,14 @@
                   onClick={handleImportarDoClic}
                   disabled={importandoClic}
                   className="bg-purple-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition flex items-center gap-2 text-sm"
-                  title="Importar produtos novos do CLic para o sistema"
+                  title="Escolher produtos do CLic para importar"
                 >
-                  {importandoClic ? (
+                  {importandoClic && !clicCandidatos ? (
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                   ) : (
                     <LucideDownload size={18} />
                   )}
-                  <span>{importandoClic ? "Importando..." : "Importar do CLic"}</span>
+                  <span>{importandoClic && !clicCandidatos ? "Consultando CLic..." : "Importar do CLic"}</span>
                 </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -4871,11 +5042,7 @@
               <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg px-4 py-3 text-sm text-purple-800 flex items-start justify-between gap-4">
                 <div>
                   <strong>Importação do CLic concluída:</strong>{" "}
-                  <span className="text-green-700 font-semibold">{importClicResult.importados} novo(s) importado(s)</span>
-                  {" · "}
-                  <span>{importClicResult.ja_existem} já existiam</span>
-                  {" · "}
-                  <span>Total no CLic: {importClicResult.total_clic}</span>
+                  <span className="text-green-700 font-semibold">{importClicResult.importados} de {importClicResult.solicitados} selecionado(s) importado(s)</span>
                   {importClicResult.erros?.length > 0 && (
                     <span className="text-red-600 ml-2">· {importClicResult.erros.length} erro(s)</span>
                   )}
