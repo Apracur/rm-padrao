@@ -5,3 +5,16 @@ node_modules/
 .DS_Store
 
 .vercel
+
+# Ruflo local secrets and runtime data
+.env.*.local
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+
+# Ruflo: memória e estado de execução (locais, mudam o tempo todo)
+.swarm/
+.claude/memory.db
+.claude-flow/metrics/
+.claude-flow/policy/
+.claude-flow/daemon-state.json
